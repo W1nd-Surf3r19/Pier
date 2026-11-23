@@ -197,6 +197,8 @@ struct GlassBackground: NSViewRepresentable {
 }
 
 struct GlassIsland<Content: View>: View {
+    /// Zusätzlicher Abstand an beiden Enden der Kapsel – damit Badge und Mulde des äußersten Icons in der Rundung bleiben.
+    var endInset: CGFloat = 0
     @ViewBuilder var content: Content
     @Environment(\.dockEdge) private var edge
     @Environment(\.dockTheme) private var theme
@@ -204,10 +206,10 @@ struct GlassIsland<Content: View>: View {
     var body: some View {
         // Zur Bildschirmkante hin etwas mehr Platz für den Lauf-Indikator.
         content
-            .padding(.top, edge == .bottom ? 6 : (edge == .top ? 9 : 7))
-            .padding(.bottom, edge == .bottom ? 9 : (edge == .top ? 6 : 7))
-            .padding(.leading, edge == .left ? 9 : (edge == .right ? 6 : 7))
-            .padding(.trailing, edge == .right ? 9 : (edge == .left ? 6 : 7))
+            .padding(.top, (edge == .bottom ? 6 : (edge == .top ? 9 : 7)) + (edge.isVertical ? endInset : 0))
+            .padding(.bottom, (edge == .bottom ? 9 : (edge == .top ? 6 : 7)) + (edge.isVertical ? endInset : 0))
+            .padding(.leading, (edge == .left ? 9 : (edge == .right ? 6 : 7)) + (edge.isVertical ? 0 : endInset))
+            .padding(.trailing, (edge == .right ? 9 : (edge == .left ? 6 : 7)) + (edge.isVertical ? 0 : endInset))
             .background { ZStack { if !theme.isClear { GlassBackground() }; Capsule().fill(theme.glassTint) } }
             .background(Capsule().fill(Color.black.opacity(0.001)))
             .overlay(

@@ -59,7 +59,7 @@ struct PillDockView: View {
                     }
                 }
             }
-            GlassIsland {
+            GlassIsland(endInset: 6) {
                 inner {
                     EntryIcons(entries: store.entries, size: size)
                     if !extra.isEmpty {
