@@ -60,7 +60,7 @@ final class Coordinator {
         let previous = current
         current = s
         if previous?.allScreens != s.allScreens || previous?.screenUUID != s.screenUUID { syncDocks(s) }
-        if s.theme == .nowPlaying { WidgetModel.shared.refreshArtwork() }
+        if s.theme == .nowPlaying || s.showNowPlaying { WidgetModel.shared.refreshArtwork() }
         for p in docks.map(\.panel) + [popup.panel, launcher.panel, altTab.panel] as [NSPanel] {
             p.appearance = s.appearance.nsAppearance
         }

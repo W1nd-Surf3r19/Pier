@@ -71,7 +71,8 @@ final class WidgetModel: ObservableObject {
 
     @Published private(set) var battery: BatteryState?
     @Published private(set) var nowPlaying: NowPlaying? { didSet { if nowPlaying?.title != oldValue?.title { refreshArtwork() } } }
-    /// Grundfarbe des aktuellen Covers – nur fürs Thema „Now Playing“ ermittelt.
+    /// Cover des aktuellen Titels (Musik-Tab) und seine Grundfarbe (Thema „Now Playing“).
+    @Published private(set) var artwork: NSImage?
     @Published private(set) var artworkColor: NSColor?
     private var artworkKey: String?
 
@@ -167,8 +168,9 @@ final class WidgetModel: ObservableObject {
     /// Liest das Cover des laufenden Titels (Music: Bilddaten in eine Temp-Datei, Spotify: Bild-URL) und
     /// mittelt seine Farbe. Läuft nur beim Thema „Now Playing“ und einmal je Titel.
     func refreshArtwork() {
-        guard DockStore.shared.settings.theme == .nowPlaying, let np = nowPlaying else {
-            if nowPlaying == nil { artworkKey = nil; if artworkColor != nil { artworkColor = nil } }
+        let s = DockStore.shared.settings
+        guard s.theme == .nowPlaying || s.showNowPlaying, let np = nowPlaying else {
+            if nowPlaying == nil { artworkKey = nil; artwork = nil; if artworkColor != nil { artworkColor = nil } }
             return
         }
         let key = np.playerBundleID + "|" + np.title
@@ -176,6 +178,7 @@ final class WidgetModel: ObservableObject {
         artworkKey = key
         let finish: @MainActor (NSImage?) -> Void = { [weak self] img in
             guard let self, self.artworkKey == key else { return }
+            self.artwork = img
             self.artworkColor = img.flatMap(ArtworkColor.average).map(ArtworkColor.accent)
             // Fehlschlag (z. B. Erlaubnis noch nicht erteilt, Netz weg): beim nächsten Anstoß erneut versuchen.
             if self.artworkColor == nil { self.artworkKey = nil }

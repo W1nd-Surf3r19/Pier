@@ -457,7 +457,8 @@ struct BarItemView: View {
                     ?? (t.groupedCount != nil ? .app(key: key, name: t.title) : .label(running.label(t.title, key: key))),
                    hoverAlways: !showTitle || t.groupedCount != nil,
                    action: { Coordinator.shared.clickTask(t) }) {
-                TabIcon(image: IconCache.icon(for: t.app)).dockBadge(first ? key : nil, inBar: true, wide: showTitle)
+                let cover = t.media ? widgets.artwork : nil
+                TabIcon(image: cover ?? IconCache.icon(for: t.app), cover: cover != nil).dockBadge(first ? key : nil, inBar: true, wide: showTitle)
                 if t.media, let np = widgets.nowPlaying {
                     VStack(alignment: .leading, spacing: 0) {
                         Text(np.title).font(.system(size: 12, weight: .semibold))
@@ -507,8 +508,11 @@ struct BarItemView: View {
 
 struct TabIcon: View {
     let image: NSImage
+    /// Album-Cover statt App-Icon: eckig, daher leicht abgerundet.
+    var cover = false
     var body: some View {
-        Image(nsImage: image).resizable().interpolation(.high).frame(width: 20, height: 20)
+        Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+            .frame(width: 20, height: 20).clipShape(RoundedRectangle(cornerRadius: cover ? 4 : 0))
     }
 }
 
