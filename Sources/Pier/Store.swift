@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import SwiftUI
 
 /// Angepinnte Apps, Ordner und Einstellungen. Wird als JSON in
 /// ~/Library/Application Support/Pier/config.json gespeichert.
@@ -80,6 +81,11 @@ final class DockStore: ObservableObject {
     func addStacks(_ urls: [URL]) {
         let existing = Set(entries.compactMap { if case .stack(let s) = $0 { s.path } else { nil } })
         entries.append(contentsOf: urls.map(DockStack.init(url:)).filter { !existing.contains($0.path) }.map(DockEntry.stack))
+    }
+
+    func addFiles(_ urls: [URL]) {
+        let existing = Set(entries.compactMap { if case .file(let f) = $0 { f.path } else { nil } })
+        entries.append(contentsOf: urls.map(DockFile.init(url:)).filter { !existing.contains($0.path) }.map(DockEntry.file))
     }
 
     func removeEntry(_ id: UUID) {
@@ -185,5 +191,23 @@ final class DockStore: ObservableObject {
         }
         var seen = Set<String>()
         return urls.map(PinnedApp.init(url:)).filter { seen.insert($0.key).inserted }.map(DockEntry.app)
+    }
+}
+
+/// Die aufgelösten Farben des Themas – aus den Einstellungen und (bei „Now Playing“) der Farbe des Covers.
+@MainActor
+final class ThemeModel: ObservableObject {
+    static let shared = ThemeModel()
+    @Published private(set) var colors = ThemeColors.fallback
+    private var sub: AnyCancellable?
+
+    private init() {
+        sub = DockStore.shared.$settings.combineLatest(WidgetModel.shared.$artworkColor)
+            .map { s, art in
+                s.theme.colors(custom: Color(nsColor: NSColor(hex: s.customColor) ?? .systemBlue),
+                               artwork: art.map { Color(nsColor: $0) })
+            }
+            .removeDuplicates()
+            .sink { [weak self] in self?.colors = $0 }
     }
 }

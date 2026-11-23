@@ -5,6 +5,7 @@ import SwiftUI
 
 struct DockRootView: View {
     @ObservedObject var store = DockStore.shared
+    @ObservedObject var theme = ThemeModel.shared
     let fit: DockFit
     var onSize: (CGSize) -> Void
 
@@ -18,7 +19,7 @@ struct DockRootView: View {
             }
         }
         .environment(\.dockEdge, s.effectiveEdge)
-        .environment(\.dockTheme, s.theme)
+        .environment(\.dockTheme, theme.colors)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { onSize($0) }
         .dropDestination(for: URL.self) { urls, _ in Coordinator.shared.drop(urls, onto: nil) }
         .contextMenu {
@@ -38,6 +39,7 @@ struct PillDockView: View {
     @ObservedObject var store = DockStore.shared
     @ObservedObject var running = RunningAppsModel.shared
     @ObservedObject var widgets = WidgetModel.shared
+    @ObservedObject var devices = DevicesModel.shared   // Geräte-Kachel kommt und geht mit Laufwerken
     @ObservedObject var fit: DockFit
 
     var body: some View {
@@ -50,6 +52,18 @@ struct PillDockView: View {
 
         // Drei schwebende Inseln: Launcher (Kreis) · Apps · Widgets – unten waagerecht, seitlich senkrecht.
         outer {
+            if settings.isFree {
+                GlassIsland {
+                    Image(systemName: "line.3.horizontal")
+                        .rotationEffect(.degrees(vertical ? 0 : 90))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: vertical ? size + 8 : 14, height: vertical ? 14 : size + 8)
+                        .overlay(MoveHandle { w in Coordinator.shared.dockMoved(w) })
+                        .help("Ziehen, um das Dock zu verschieben")
+                        .accessibilityLabel("Dock verschieben")
+                }
+            }
             if settings.showLauncher {
                 GlassIsland {
                     DockIcon(size: size, state: .none, hover: .label("Apps"), action: { Coordinator.shared.toggleLauncher() }) {
@@ -91,6 +105,7 @@ enum BarItem: Identifiable {
     case pinned(PinnedApp)
     case folder(DockFolder)
     case stack(DockStack)
+    case file(DockFile)
     case separator(UUID)
     case task(TaskItem)
 
@@ -100,6 +115,7 @@ enum BarItem: Identifiable {
         case .pinned(let a): "p-\(a.id)"
         case .folder(let f): "f-\(f.id)"
         case .stack(let s): "s-\(s.id)"
+        case .file(let f): "d-\(f.id)"
         case .separator(let id): "sep-\(id)"
         case .task(let t): t.id
         }
@@ -107,6 +123,7 @@ enum BarItem: Identifiable {
 
     /// Nicht laufende Einträge sind immer kompakte Icon-Tabs.
     var isCompact: Bool { if case .task = self { false } else { true } }
+    var isMedia: Bool { if case .task(let t) = self { t.media } else { false } }
     var isSeparator: Bool { if case .separator = self { true } else { false } }
 }
 
@@ -114,13 +131,19 @@ struct BarDockView: View {
     let settings: DockSettings
     @ObservedObject var store = DockStore.shared
     @ObservedObject var running = RunningAppsModel.shared
+    @ObservedObject var widgets = WidgetModel.shared
+    @ObservedObject var devices = DevicesModel.shared
 
     var body: some View {
-        let strip = WidgetStrip(settings: settings, compact: false)
+        let plain = items(grouped: false)
+        // Spielt Musik und hat der Player einen Tab, zeigt der Tab sie – das Widget rechts entfällt.
+        let strip = WidgetStrip(settings: settings, compact: false, hideNowPlaying: plain.contains(where: \.isMedia))
         let height = DockMetrics.barHeight(settings) - 12
 
         HStack(spacing: 0) {
-            TabRow(items: items, height: height, labels: settings.barLabels)
+            TabRow(items: plain, groupedItems: settings.windowGrouping == .never ? nil : items(grouped: true),
+                   grouping: settings.windowGrouping,
+                   height: height, labels: settings.barLabels)
                 .padding(.leading, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if strip.hasContent {
@@ -134,7 +157,7 @@ struct BarDockView: View {
 
     /// Angepinnte Apps in deiner Reihenfolge – laufen sie, stehen ihre Fenster an genau dieser Stelle.
     /// Danach alle übrigen laufenden Apps.
-    private var items: [BarItem] {
+    private func items(grouped: Bool) -> [BarItem] {
         var result: [BarItem] = settings.showLauncher ? [.launcher] : []
         var used = Set<pid_t>()
         for entry in store.entries {
@@ -143,12 +166,14 @@ struct BarDockView: View {
                 result.append(.folder(f))
             case .stack(let s):
                 result.append(.stack(s))
+            case .file(let f):
+                result.append(.file(f))
             case .separator(let s):
                 result.append(.separator(s.id))
             case .app(let a):
                 if let app = running.app(forKey: a.key) {
                     used.insert(app.processIdentifier)
-                    result += running.tasks(for: app).map(BarItem.task)
+                    result += running.tasks(for: app, grouped: grouped).map(BarItem.task)
                 } else {
                     result.append(.pinned(a))
                 }
@@ -156,8 +181,14 @@ struct BarDockView: View {
         }
         if settings.showRunningApps {
             for app in running.otherApps where !used.contains(app.processIdentifier) {
-                result += running.tasks(for: app).map(BarItem.task)
+                result += running.tasks(for: app, grouped: grouped).map(BarItem.task)
             }
+        }
+        if settings.showNowPlaying, let player = widgets.nowPlaying?.playerBundleID,
+           let i = result.firstIndex(where: { if case .task(let t) = $0 { AppName.key(t.app) == player } else { false } }),
+           case .task(var t) = result[i] {
+            t.media = true
+            result[i] = .task(t)
         }
         return result
     }
@@ -165,33 +196,59 @@ struct BarDockView: View {
 
 struct TabRow: View {
     let items: [BarItem]
+    /// Dieselben Tabs mit gruppierten Fenstern – für „Immer“ und für „Automatisch“, wenn es eng wird.
+    var groupedItems: [BarItem]? = nil
+    var grouping: WindowGrouping = .never
     let height: CGFloat
     var labels: BarLabels = .automatic
     static let compactWidth: CGFloat = 40
-    private let separatorWidth: CGFloat = 9
-    private let spacing: CGFloat = 4
+    static let mediaWidth: CGFloat = 250
+    static let separatorWidth: CGFloat = 9
+    static let spacing: CGFloat = 4
+    private var separatorWidth: CGFloat { Self.separatorWidth }
+    private var spacing: CGFloat { Self.spacing }
+
+    /// Breite je Tab mit Titel, wenn die Zeile `width` breit ist.
+    static func widthPerTab(_ items: [BarItem], width: CGFloat) -> CGFloat {
+        let seps = CGFloat(items.filter(\.isSeparator).count)
+        let media = CGFloat(items.filter(\.isMedia).count)
+        let compact = CGFloat(items.filter(\.isCompact).count) - seps
+        let wide = CGFloat(items.count) - compact - seps - media
+        let free = width - compact * compactWidth - seps * separatorWidth - media * mediaWidth
+            - spacing * CGFloat(max(items.count - 1, 0))
+        return wide > 0 ? (free / wide).rounded(.down) : 0
+    }
+
+    /// „Automatisch“ gruppiert erst, wenn die Tabs sonst keinen lesbaren Titel mehr hätten.
+    static func useGrouped(_ grouping: WindowGrouping, widthPerTab: CGFloat) -> Bool {
+        switch grouping {
+        case .never: false
+        case .always: true
+        case .automatic: widthPerTab < 84
+        }
+    }
 
     var body: some View {
         GeometryReader { geo in
-            let seps = CGFloat(items.filter(\.isSeparator).count)
-            let compact = CGFloat(items.filter(\.isCompact).count) - seps
-            let wide = CGFloat(items.count) - compact - seps
-            let free = geo.size.width - compact * Self.compactWidth - seps * separatorWidth
-                - spacing * CGFloat(max(items.count - 1, 0))
-            let per = wide > 0 ? (free / wide).rounded(.down) : 0
+            let items = groupedItems.map { g in
+                Self.useGrouped(grouping, widthPerTab: Self.widthPerTab(self.items, width: geo.size.width)) ? g : self.items
+            } ?? self.items
+            let per = Self.widthPerTab(items, width: geo.size.width)
             let showTitle = TabRow.showsTitle(labels, widthPerTab: per)
             HStack(spacing: spacing) {
                 ForEach(items) { item in
                     BarItemView(item: item, height: height,
                                 width: item.isSeparator ? separatorWidth
+                                    : item.isMedia ? Self.mediaWidth
                                     : (item.isCompact || !showTitle ? Self.compactWidth : min(210, per)),
-                                showTitle: !item.isCompact && showTitle)
+                                showTitle: item.isMedia || (!item.isCompact && showTitle))
                 }
             }
             .frame(maxHeight: .infinity)
         }
         .frame(height: height)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: items.map(\.id))
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: groupedItems?.map(\.id))
     }
 
     /// Automatisch: Text nur, wenn jeder Tab mindestens 84 pt bekommt. „Icon und Text“ zeigt ihn immer (notfalls gekürzt).
@@ -211,6 +268,7 @@ struct BarItemView: View {
     let showTitle: Bool
     @ObservedObject var running = RunningAppsModel.shared
     @ObservedObject var store = DockStore.shared
+    @ObservedObject var widgets = WidgetModel.shared
     @Environment(\.dockTheme) private var theme
     @State private var anchor: CGRect = .zero
 
@@ -248,6 +306,12 @@ struct BarItemView: View {
             }
             .onHoverAlways { h, r in if h { anchor = r } }
             .contextMenu { StackMenu(stack: s) }
+        case .file(let f):
+            BarTab(height: height, width: width, filled: false, hover: .label(f.name),
+                   action: { Coordinator.shared.openFile(f) }) {
+                TabIcon(image: IconCache.icon(forPath: f.path))
+            }
+            .contextMenu { FileMenu(file: f) }
         case .task(let t):
             // Badge, Fortschritt und Blinken gehören zur App – sie erscheinen nur am ersten Tab.
             let key = AppName.key(t.app)
@@ -259,17 +323,40 @@ struct BarItemView: View {
                    attention: first && running.attention.contains(key),
                    progress: progress, mediaKey: first ? key : nil,
                    badge: first && showTitle && store.settings.showBadges ? running.badges[key] : nil,
-                   hover: t.window.map { .window($0) } ?? .label(running.label(t.title, key: key)), hoverAlways: !showTitle,
+                   hover: t.window.map { .window($0) }
+                    ?? (t.groupedCount != nil ? .app(key: key, name: t.title) : .label(running.label(t.title, key: key))),
+                   hoverAlways: !showTitle || t.groupedCount != nil,
                    action: { Coordinator.shared.clickTask(t) }) {
                 TabIcon(image: IconCache.icon(for: t.app)).dockBadge(first ? key : nil, inBar: true, wide: showTitle)
-                if showTitle {
+                if t.media, let np = widgets.nowPlaying {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(np.title).font(.system(size: 12, weight: .semibold))
+                        if !np.artist.isEmpty {
+                            Text(np.artist).font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary)
+                        }
+                    }
+                    .lineLimit(1)
+                    .dockTextShadow()
+                    // Platz für die Tasten, die über dem Tab liegen.
+                    .padding(.trailing, 52)
+                } else if showTitle {
                     Text(Self.title(t.title, progress: progress, hung: hung))
                         .font(.system(size: 12, weight: t.isActive ? .semibold : .regular))
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .dockTextShadow()
+                    if let n = t.groupedCount {
+                        Text("\(n)")
+                            .font(.system(size: 10.5, weight: .semibold).monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().fill(Color.primary.opacity(0.1)))
+                            .accessibilityLabel("\(n) Fenster")
+                    }
                 }
             }
+            // Steuerung liegt über dem Tab statt darin – Tasten in einem Button bekämen keine Klicks.
+            .overlay(alignment: .trailing) { if t.media { MediaControls().padding(.trailing, 8) } }
             .dropDestination(for: URL.self) { urls, _ in Coordinator.shared.drop(urls, onto: t.app.bundleURL) }
             .contextMenu { RunningAppMenu(app: t.app, window: t.window) }
         }
@@ -399,6 +486,7 @@ struct EntryIcons: View {
             case .app(let app): PinnedAppIcon(app: app, size: size)
             case .folder(let f): FolderTile(folder: f, size: size)
             case .stack(let s): StackTile(stack: s, size: size)
+            case .file(let f): FileTile(file: f, size: size)
             case .separator:
                 DockDivider(height: size * 0.55, horizontal: edge.isVertical)
                     .padding(edge.isVertical ? .vertical : .horizontal, 7)
@@ -819,6 +907,29 @@ struct StackTile: View {
     }
 }
 
+/// Angepinnte Datei: Klick öffnet sie mit ihrer Standard-App.
+struct FileTile: View {
+    let file: DockFile
+    let size: CGFloat
+
+    var body: some View {
+        DockIcon(image: IconCache.icon(forPath: file.path), size: size, state: .none, hover: .label(file.name)) {
+            Coordinator.shared.openFile(file)
+        }
+        .contextMenu { FileMenu(file: file) }
+    }
+}
+
+struct FileMenu: View {
+    let file: DockFile
+    var body: some View {
+        Button("Öffnen") { Coordinator.shared.openFile(file) }
+        Button("Im Finder zeigen") { AppActions.revealInFinder(file.url) }
+        Divider()
+        Button("Aus dem Dock entfernen") { DockStore.shared.removeEntry(file.id) }
+    }
+}
+
 struct StackMenu: View {
     let stack: DockStack
     var body: some View {
@@ -849,7 +960,7 @@ private struct DockEdgeKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    @Entry var dockTheme = DockTheme.system
+    @Entry var dockTheme = ThemeColors.fallback
     var dockEdge: DockEdge {
         get { self[DockEdgeKey.self] }
         set { self[DockEdgeKey.self] = newValue }

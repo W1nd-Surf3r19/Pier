@@ -5,12 +5,16 @@ enum HoverTarget: Equatable {
     case app(key: String, name: String)
     case window(WindowRef)
     case label(String)
+    case calendar
+    case battery
 }
 
 enum PopupContent: Equatable {
     case preview(HoverTarget)
     case folder(DockFolder)
     case stack(DockStack)
+    case sound
+    case devices
 }
 
 /// Kleines schwebendes Fenster über dem Dock: Name, Fenster-Vorschau oder Ordner-Inhalt.
@@ -84,13 +88,20 @@ final class PopupController {
     /// Ordner und Stapel bleiben per Klick offen, bis man daneben klickt.
     private var isPinnedOpen: Bool {
         switch content {
-        case .folder?, .stack?: true
+        case .folder?, .stack?, .sound?, .devices?: true
         default: false
         }
     }
 
     func toggleFolder(_ folder: DockFolder, anchor: CGRect) { toggle(.folder(folder), anchor: anchor) }
     func toggleStack(_ stack: DockStack, anchor: CGRect) { toggle(.stack(stack), anchor: anchor) }
+    func toggleSound(anchor: CGRect) { toggle(.sound, anchor: anchor) }
+    func toggleDevices(anchor: CGRect) {
+        DevicesModel.shared.message = nil
+        DevicesModel.shared.refreshVolumes()
+        DevicesModel.shared.refreshBluetooth()
+        toggle(.devices, anchor: anchor)
+    }
 
     private func toggle(_ c: PopupContent, anchor: CGRect) {
         if content == c, panel.isVisible {
@@ -169,6 +180,7 @@ final class PopupController {
 struct PopupRootView: View {
     let content: PopupContent?
     var onSize: (CGSize) -> Void
+    @ObservedObject var theme = ThemeModel.shared
 
     var body: some View {
         Group {
@@ -176,15 +188,17 @@ struct PopupRootView: View {
             case .preview(let t)?: PreviewView(target: t)
             case .folder(let f)?: FolderGridView(folder: f)
             case .stack(let s)?: StackView(stack: s)
+            case .sound?: SoundPopup()
+            case .devices?: DevicesPopup()
             case nil: EmptyView()
             }
         }
         .fixedSize()
         // Panel ist genau so groß wie der Inhalt – gleiche Rundung wie die Glas-Maske (PanelFactory.maskImage).
-        .background(RoundedRectangle(cornerRadius: DockMetrics.popupRadius).fill(DockStore.shared.settings.theme.glassTint))
+        .background(RoundedRectangle(cornerRadius: DockMetrics.popupRadius).fill(theme.colors.glassTint))
         .onGeometryChange(for: CGSize.self) { $0.size } action: { onSize($0) }
         .onHoverAlways { h, _ in Coordinator.shared.popup.setPopupHovered(h) }
-        .environment(\.dockTheme, DockStore.shared.settings.theme)
+        .environment(\.dockTheme, theme.colors)
     }
 }
 
@@ -198,6 +212,10 @@ struct PreviewView: View {
         switch target {
         case .label(let text):
             NameLabel(text: text)
+        case .calendar:
+            CalendarPopup()
+        case .battery:
+            BatteryPopup()
         case .window(let w):
             WindowCard(window: w, thumbnails: true).padding(10)
         case .app(let key, let name):

@@ -2,9 +2,78 @@ import AppKit
 import SwiftUI
 
 struct LaunchItem: Identifiable, Hashable {
+    enum Kind: Hashable { case app, setting, folder }
+    /// Pfad (App, Ordner) bzw. Einstellungs-URL.
     let id: String
     let name: String
-    var url: URL { URL(fileURLWithPath: id) }
+    var kind: Kind = .app
+    /// SF Symbol statt Datei-Icon (Einstellungsbereiche).
+    var symbol: String? = nil
+    var url: URL { kind == .setting ? URL(string: id)! : URL(fileURLWithPath: id) }
+}
+
+/// Bereiche der Systemeinstellungen. Die Namen in den .appex sind englisch, deshalb eine feste deutsche Liste;
+/// gezeigt wird nur, was es auf diesem Mac gibt. Alle Links am 2026-11-23 einzeln geprüft (macOS 27); „Maus“ fehlt,
+/// weil der Link ohne angeschlossene Maus in „Tastatur“ landet.
+enum SettingsCatalog {
+    private static let panes: [(name: String, bundle: String, appex: String, symbol: String)] = [
+        ("Allgemein", "com.apple.systempreferences.GeneralSettings", "GeneralSettings", "gearshape.fill"),
+        ("Apple Account", "com.apple.systempreferences.AppleIDSettings", "AppleIDSettings", "person.crop.circle.fill"),
+        ("WLAN", "com.apple.wifi-settings-extension", "Wi-Fi", "wifi"),
+        ("Bluetooth", "com.apple.BluetoothSettings", "Bluetooth", "antenna.radiowaves.left.and.right"),
+        ("Netzwerk", "com.apple.Network-Settings.extension", "Network", "network"),
+        ("VPN", "com.apple.NetworkExtensionSettingsUI.NESettingsUIExtension", "VPN", "lock.shield.fill"),
+        ("Batterie", "com.apple.Battery-Settings.extension", "PowerPreferences", "battery.100percent"),
+        ("Erscheinungsbild", "com.apple.Appearance-Settings.extension", "Appearance", "circle.lefthalf.filled"),
+        ("Bedienungshilfen", "com.apple.Accessibility-Settings.extension", "AccessibilitySettingsExtension", "accessibility"),
+        ("Menüleiste", "com.apple.ControlCenter-Settings.extension", "ControlCenterSettings", "menubar.rectangle"),
+        ("Siri", "com.apple.Siri-Settings.extension", "SiriPreferenceExtension", "waveform"),
+        ("Spotlight", "com.apple.Spotlight-Settings.extension", "SpotlightPreferenceExtension", "magnifyingglass"),
+        ("Datenschutz & Sicherheit", "com.apple.settings.PrivacySecurity.extension", "SecurityPrivacyExtension", "hand.raised.fill"),
+        ("Schreibtisch & Dock", "com.apple.Desktop-Settings.extension", "DesktopSettings", "dock.rectangle"),
+        ("Displays", "com.apple.Displays-Settings.extension", "DisplaysExt", "display"),
+        ("Hintergrundbild", "com.apple.Wallpaper-Settings.extension", "Wallpaper", "photo.fill"),
+        ("Mitteilungen", "com.apple.Notifications-Settings.extension", "NotificationsSettings", "bell.badge.fill"),
+        ("Ton", "com.apple.Sound-Settings.extension", "Sound", "speaker.wave.2.fill"),
+        ("Fokus", "com.apple.Focus-Settings.extension", "FocusSettingsExtension", "moon.fill"),
+        ("Bildschirmzeit", "com.apple.Screen-Time-Settings.extension", "ScreenTimePreferencesExtension", "hourglass"),
+        ("Sperrbildschirm", "com.apple.Lock-Screen-Settings.extension", "LockScreen", "lock.fill"),
+        ("Touch ID & Passwort", "com.apple.Touch-ID-Settings.extension", "Touch ID & Password", "touchid"),
+        ("Benutzer:innen & Gruppen", "com.apple.Users-Groups-Settings.extension", "UsersGroups", "person.2.fill"),
+        ("Internetaccounts", "com.apple.Internet-Accounts-Settings.extension", "InternetAccountsSettingsExtension", "at"),
+        ("Wallet & Apple Pay", "com.apple.WalletSettingsExtension", "WalletSettingsExtension", "wallet.pass.fill"),
+        ("Tastatur", "com.apple.Keyboard-Settings.extension", "KeyboardSettings", "keyboard"),
+        ("Trackpad", "com.apple.Trackpad-Settings.extension", "TrackpadExtension", "rectangle.and.hand.point.up.left.fill"),
+        ("Drucker & Scanner", "com.apple.Print-Scan-Settings.extension", "PrinterScannerSettings", "printer.fill"),
+        ("Softwareupdate", "com.apple.Software-Update-Settings.extension", "SoftwareUpdateSettingsExtension", "arrow.triangle.2.circlepath"),
+        ("Speicher", "com.apple.settings.Storage", "Storage", "internaldrive.fill"),
+        ("Teilen", "com.apple.Sharing-Settings.extension", "Sharing", "person.2.wave.2.fill"),
+        ("Time Machine", "com.apple.Time-Machine-Settings.extension", "TimeMachineSettings", "clock.arrow.circlepath"),
+        ("Anmeldeobjekte", "com.apple.LoginItems-Settings.extension", "LoginItems", "list.bullet.rectangle.fill"),
+        ("Sprache & Region", "com.apple.Localization-Settings.extension", "Localization", "globe"),
+        ("Datum & Uhrzeit", "com.apple.Date-Time-Settings.extension", "DateAndTime Extension", "clock.fill"),
+        ("Startvolume", "com.apple.Startup-Disk-Settings.extension", "StartupDisk", "externaldrive.fill"),
+        ("Info", "com.apple.SystemProfiler.AboutExtension", "AboutExtension", "info.circle.fill"),
+    ]
+
+    static func scan() -> [LaunchItem] {
+        panes.filter { FileManager.default.fileExists(atPath: "/System/Library/ExtensionKit/Extensions/\($0.appex).appex") }
+            .map { LaunchItem(id: "x-apple.systempreferences:\($0.bundle)", name: $0.name, kind: .setting, symbol: $0.symbol) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// Standardordner des Benutzers plus die eigenen aus den Einstellungen.
+    static func folders(custom: [String]) -> [LaunchItem] {
+        let fm = FileManager.default
+        let standard: [FileManager.SearchPathDirectory] = [.desktopDirectory, .documentDirectory, .downloadsDirectory,
+                                                           .applicationDirectory]
+        let urls = [fm.homeDirectoryForCurrentUser] + standard.compactMap { fm.urls(for: $0, in: $0 == .applicationDirectory ? .localDomainMask : .userDomainMask).first }
+            + custom.map { URL(fileURLWithPath: $0) }
+        var seen = Set<String>()
+        return urls.map(\.standardizedFileURL.path)
+            .filter { fm.fileExists(atPath: $0) && seen.insert($0).inserted }
+            .map { LaunchItem(id: $0, name: fm.displayName(atPath: $0), kind: .folder) }
+    }
 }
 
 enum AppCatalog {
@@ -36,18 +105,35 @@ enum AppCatalog {
 
 @MainActor
 final class LauncherModel: ObservableObject {
+    enum Section: String, CaseIterable, Identifiable {
+        case apps = "Apps", settings = "Einstellungen", folders = "Ordner"
+        var id: String { rawValue }
+    }
+
     @Published var query = "" { didSet { selection = 0 } }
+    @Published var section = Section.apps { didSet { selection = 0; scrollTarget = nil } }
     @Published var selection = 0
     @Published private(set) var all: [LaunchItem] = []
+    private let settingsItems = SettingsCatalog.scan()
+    /// Beim Öffnen eingelesen (reload), nicht bei jedem Tastendruck.
+    @Published private(set) var folderItems: [LaunchItem] = []
     @Published var focusToken = 0
     /// Nur Tastatur-Navigation scrollt – Hover soll die Liste nicht verschieben.
     @Published var scrollTarget: String?
 
     static let columns = 6
 
+    /// Ohne Suche der gewählte Bereich; mit Suche alles (Apps zuerst, dann Einstellungen, dann Ordner).
     var results: [LaunchItem] {
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return all }
+        guard !q.isEmpty else {
+            switch section {
+            case .apps: return all
+            case .settings: return settingsItems
+            case .folders: return folderItems
+            }
+        }
+        let all = self.all + settingsItems + folderItems
         let prefix = all.filter { $0.name.range(of: q, options: [.caseInsensitive, .diacriticInsensitive, .anchored]) != nil }
         let contains = all.filter {
             $0.name.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil && !prefix.contains($0)
@@ -56,6 +142,7 @@ final class LauncherModel: ObservableObject {
     }
 
     func reload() {
+        folderItems = SettingsCatalog.folders(custom: DockStore.shared.settings.launcherFolders)
         Task.detached(priority: .userInitiated) {
             let items = AppCatalog.scan()
             await MainActor.run { self.all = items }
@@ -99,6 +186,7 @@ final class LauncherController: NSObject, NSWindowDelegate {
         let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? PanelFactory.mainScreen
         guard let sf = screen?.visibleFrame else { return }
         model.query = ""
+        model.section = .apps
         model.selection = 0
         model.scrollTarget = nil
         model.reload()
@@ -124,7 +212,7 @@ final class LauncherController: NSObject, NSWindowDelegate {
 
     private func launch(_ item: LaunchItem) {
         hide()
-        AppActions.launch(item.url)
+        if item.kind == .app { AppActions.launch(item.url) } else { NSWorkspace.shared.open(item.url) }
     }
 
     private func installKeyMonitor() {
@@ -162,7 +250,7 @@ struct LauncherView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 19, weight: .medium))
                     .foregroundStyle(.secondary)
-                TextField("Apps durchsuchen", text: $model.query)
+                TextField("Apps, Einstellungen und Ordner durchsuchen", text: $model.query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 22))
                     .focused($focused)
@@ -176,11 +264,21 @@ struct LauncherView: View {
             .padding(.horizontal, 24)
             .frame(height: 66)
 
+            if model.query.isEmpty {
+                Picker("Bereich", selection: $model.section) {
+                    ForEach(LauncherModel.Section.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 330)
+                .padding(.bottom, 12)
+            }
+
             Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1)
 
             if results.isEmpty {
                 Spacer()
-                Text("Keine Apps gefunden").font(.system(size: 14)).foregroundStyle(.secondary)
+                Text("Nichts gefunden").font(.system(size: 14)).foregroundStyle(.secondary)
                 Spacer()
             } else {
                 ScrollViewReader { proxy in
@@ -205,7 +303,7 @@ struct LauncherView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Gleiche Rundung wie das Glas-Panel (makeGlass radius: 24).
-        .background(RoundedRectangle(cornerRadius: 24).fill(DockStore.shared.settings.theme.glassTint))
+        .background(RoundedRectangle(cornerRadius: 24).fill(ThemeModel.shared.colors.glassTint))
         .onChange(of: model.focusToken, initial: true) { DispatchQueue.main.async { focused = true } }
     }
 }
@@ -213,14 +311,27 @@ struct LauncherView: View {
 struct LauncherCell: View {
     let item: LaunchItem
     let selected: Bool
-    private var theme: DockTheme { DockStore.shared.settings.theme }
+    private var theme: ThemeColors { ThemeModel.shared.colors }
 
     var body: some View {
         VStack(spacing: 7) {
-            Image(nsImage: IconCache.icon(forPath: item.id))
-                .resizable().interpolation(.high)
-                .frame(width: 62, height: 62)
-                .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
+            Group {
+                if let symbol = item.symbol {
+                    // Einstellungsbereich: Symbol auf grauer Kachel wie in den Systemeinstellungen.
+                    Image(systemName: symbol)
+                        .font(.system(size: 26, weight: .medium))
+                        .foregroundStyle(.white)
+                        .frame(width: 54, height: 54)
+                        .background(RoundedRectangle(cornerRadius: 13, style: .continuous)
+                            .fill(LinearGradient(colors: [Color(white: 0.55), Color(white: 0.38)], startPoint: .top, endPoint: .bottom)))
+                        .frame(width: 62, height: 62)
+                } else {
+                    Image(nsImage: IconCache.icon(forPath: item.id))
+                        .resizable().interpolation(.high)
+                        .frame(width: 62, height: 62)
+                }
+            }
+            .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
             Text(item.name)
                 .font(.system(size: 11.5, weight: .medium))
                 .lineLimit(1)

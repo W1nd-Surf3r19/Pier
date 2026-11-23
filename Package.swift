@@ -13,6 +13,8 @@ let package = Package(
                 .linkedFramework("IOKit"),
                 .linkedFramework("ServiceManagement"),
                 .linkedFramework("Carbon"),
+                .linkedFramework("CoreAudio"),
+                .linkedFramework("IOBluetooth"),
             ]
         ),
         .testTarget(name: "PierTests", dependencies: ["Pier"], path: "Tests/PierTests"),

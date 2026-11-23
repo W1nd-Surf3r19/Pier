@@ -11,6 +11,10 @@ struct TaskItem: Identifiable, Equatable {
     let window: WindowRef?
     let title: String
     let isActive: Bool
+    /// Gemeinsamer Tab für mehrere Fenster (Fenstergruppierung): deren Anzahl, sonst nil.
+    var groupedCount: Int? = nil
+    /// Der Tab des Players, der gerade spielt: breiter, mit Titel und Steuerung statt eigenem Musik-Widget.
+    var media = false
     var isMinimized: Bool { window?.isMinimized ?? false }
 }
 
@@ -179,7 +183,8 @@ final class RunningAppsModel: ObservableObject {
     }
 
     /// Tabs einer App für die Leiste: ein Tab pro Fenster, ohne Fenster ein App-Tab.
-    func tasks(for app: NSRunningApplication) -> [TaskItem] {
+    /// `grouped`: mehrere Fenster teilen sich einen Tab.
+    func tasks(for app: NSRunningApplication, grouped: Bool = false) -> [TaskItem] {
         let key = AppName.key(app)
         let name = app.localizedName ?? "App"
         let isFront = app.processIdentifier == frontmostPID && !app.isHidden
@@ -187,16 +192,34 @@ final class RunningAppsModel: ObservableObject {
         if wins.isEmpty {
             return [TaskItem(id: "a-\(key)", app: app, window: nil, title: name, isActive: isFront)]
         }
+        if grouped, wins.count > 1 {
+            return [TaskItem(id: "g-\(key)", app: app, window: nil, title: name, isActive: isFront, groupedCount: wins.count)]
+        }
         return wins.map { w in
             TaskItem(id: w.id, app: app, window: w, title: w.title.isEmpty ? name : w.title,
                      isActive: isFront && w.isFocused)
         }
     }
 
-    /// Alle laufenden Apps außer Pier selbst und den ausgeschlossenen.
+    /// Alle laufenden Apps außer Pier selbst und den ausgeschlossenen, in der gewählten Reihenfolge.
     var otherApps: [NSRunningApplication] {
-        let excluded = DockStore.shared.settings.excludedApps
-        return apps.filter { $0.bundleURL?.lastPathComponent != "Pier.app" && excluded[AppName.key($0)] == nil }
+        let s = DockStore.shared.settings
+        let list = apps.filter { $0.bundleURL?.lastPathComponent != "Pier.app" && s.excludedApps[AppName.key($0)] == nil }
+        return Self.ordered(list, by: s.runningOrder, name: { $0.localizedName ?? "" }, launched: \.launchDate)
+    }
+
+    /// Nach Startzeit (älteste zuerst) oder alphabetisch; bei Gleichstand bleibt die bisherige Reihenfolge.
+    nonisolated static func ordered<T>(_ items: [T], by order: RunningOrder, name: (T) -> String, launched: (T) -> Date?) -> [T] {
+        items.enumerated().sorted { a, b in
+            switch order {
+            case .launch:
+                let da = launched(a.element) ?? .distantPast, db = launched(b.element) ?? .distantPast
+                return da != db ? da < db : a.offset < b.offset
+            case .alphabetical:
+                let r = name(a.element).localizedStandardCompare(name(b.element))
+                return r != .orderedSame ? r == .orderedAscending : a.offset < b.offset
+            }
+        }.map(\.element)
     }
 }
 

@@ -21,7 +21,9 @@
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Pier liest die Titelposition aus Music und VLC, um den Fortschritt im Dock anzuzeigen.</string>
+    <string>Pier liest die Titelposition aus Music und VLC sowie beim Thema „Now Playing“ das Cover aus Music und Spotify.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Pier zeigt deine gekoppelten Bluetooth-Geräte in der Geräte-Liste und verbindet oder trennt sie dort.</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>

@@ -59,7 +59,8 @@ final class Coordinator {
     func apply(_ s: DockSettings) {
         let previous = current
         current = s
-        if previous?.allScreens != s.allScreens { syncDocks(s) }
+        if previous?.allScreens != s.allScreens || previous?.screenUUID != s.screenUUID { syncDocks(s) }
+        if s.theme == .nowPlaying { WidgetModel.shared.refreshArtwork() }
         for p in docks.map(\.panel) + [popup.panel, launcher.panel, altTab.panel] as [NSPanel] {
             p.appearance = s.appearance.nsAppearance
         }
@@ -116,8 +117,8 @@ final class Coordinator {
         store.removeEntry(entry.id)
     }
 
-    /// Aufs Dock gezogene Programme werden angepinnt, Ordner (nur auf freie Dock-Fläche) zu Stapeln,
-    /// andere Dateien mit der Ziel-App geöffnet.
+    /// Aufs Dock gezogene Programme werden angepinnt. Auf freier Dock-Fläche werden Ordner zu Stapeln und
+    /// andere Dateien angepinnt; auf einer App öffnet sie die Dateien.
     @discardableResult
     func drop(_ urls: [URL], onto appURL: URL?) -> Bool {
         let apps = urls.filter { $0.pathExtension == "app" }
@@ -126,9 +127,12 @@ final class Coordinator {
             store.addApps(apps)
             return true
         }
-        if appURL == nil, !urls.isEmpty, apps.count + dirs.count == urls.count {
+        if appURL == nil, !urls.isEmpty {
+            // Web-Links (z. B. ein Tab aus Safari) sind keine Dateien – nicht anpinnen.
+            guard urls.allSatisfy(\.isFileURL) else { return false }
             store.addApps(apps)
             store.addStacks(dirs)
+            store.addFiles(urls.filter { !apps.contains($0) && !dirs.contains($0) })
             return true
         }
         guard let appURL, !urls.isEmpty else { return false }
@@ -140,7 +144,9 @@ final class Coordinator {
 
     /// Legt Docks für neue Bildschirme an und räumt die abgesteckter (oder abgewählter) ab.
     func syncDocks(_ s: DockSettings) {
-        let screens = s.allScreens ? NSScreen.screens : Array(NSScreen.screens.prefix(1))
+        // Gewählter Bildschirm; ist er nicht angeschlossen, der Hauptbildschirm.
+        let chosen = NSScreen.screens.first { s.screenUUID != nil && $0.uuid == s.screenUUID } ?? NSScreen.screens.first
+        let screens = s.allScreens ? NSScreen.screens : (chosen.map { [$0] } ?? [])
         var wanted = screens.map(\.displayID)
         // Beim Zuklappen/Display-Schlaf meldet macOS kurz keine Bildschirme – dann nichts abbauen.
         if wanted.isEmpty {
@@ -164,6 +170,10 @@ final class Coordinator {
         popup?.hide()
     }
 
+    func dockMoved(_ w: NSWindow) {
+        docks.first { $0.panel === w }?.movedByUser()
+    }
+
     func isDockPanel(_ w: NSWindow?) -> Bool {
         guard let w else { return false }
         return docks.contains { $0.panel === w }
@@ -182,7 +192,7 @@ final class Coordinator {
     func updateWindowFitter() {
         guard let s = current, let screen = dock.screen else { return }
         var reserved: CGFloat = 0
-        if s.fitWindows && !s.autoHide && s.effectiveEdge == .bottom {
+        if s.fitWindows && !s.autoHide && s.effectiveEdge == .bottom && !s.isFree {
             reserved = s.style == .bar
                 ? DockMetrics.barHeight(s)
                 : dock.panel.frame.maxY - screen.frame.minY + DockMetrics.pillBottomGap
@@ -234,7 +244,7 @@ final class Coordinator {
             switch hovered {
             case .app(let key, _): wins = running.windows(forKey: key)
             case .window(let w): wins = NSRunningApplication(processIdentifier: w.pid).map(running.shownWindows) ?? []
-            case .label: return
+            case .label, .calendar, .battery: return
             }
             guard !wins.isEmpty else { return }
             let current = wins.firstIndex { $0.isFocused && $0.pid == running.frontmostPID } ?? -step
@@ -248,6 +258,8 @@ final class Coordinator {
 
     func toggleFolder(_ folder: DockFolder, anchor: CGRect) { popup.toggleFolder(folder, anchor: anchor) }
     func toggleStack(_ stack: DockStack, anchor: CGRect) { popup.toggleStack(stack, anchor: anchor) }
+    func toggleSound(anchor: CGRect) { popup.toggleSound(anchor: anchor) }
+    func toggleDevices(anchor: CGRect) { popup.toggleDevices(anchor: anchor) }
 
     func clickApp(key: String, url: URL?) {
         popup.hide()
@@ -262,6 +274,11 @@ final class Coordinator {
             running.markLaunching(key)
             AppActions.launch(url)
         }
+    }
+
+    func openFile(_ file: DockFile) {
+        popup.hide()
+        NSWorkspace.shared.open(file.url)
     }
 
     func launchFromFolder(_ app: PinnedApp) {

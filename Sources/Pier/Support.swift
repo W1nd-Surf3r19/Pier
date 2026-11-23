@@ -247,3 +247,45 @@ struct DockPressStyle: ButtonStyle {
             .animation(.spring(response: 0.2, dampingFraction: 0.6), value: configuration.isPressed)
     }
 }
+
+// MARK: Griff zum Verschieben der frei schwebenden Pille
+
+/// Ziehen bewegt das Fenster, in dem der Griff liegt; Loslassen meldet die neue Lage.
+struct MoveHandle: NSViewRepresentable {
+    var onEnd: (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> HandleView {
+        let v = HandleView()
+        v.onEnd = onEnd
+        return v
+    }
+
+    func updateNSView(_ v: HandleView, context: Context) { v.onEnd = onEnd }
+
+    final class HandleView: NSView {
+        var onEnd: ((NSWindow) -> Void)?
+        private var start: (mouse: NSPoint, origin: NSPoint)?
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
+
+        override func mouseDown(with event: NSEvent) {
+            guard let w = window else { return }
+            start = (NSEvent.mouseLocation, w.frame.origin)
+            NSCursor.closedHand.push()
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let w = window, let s = start else { return }
+            let m = NSEvent.mouseLocation
+            w.setFrameOrigin(NSPoint(x: s.origin.x + m.x - s.mouse.x, y: s.origin.y + m.y - s.mouse.y))
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard start != nil else { return }
+            start = nil
+            NSCursor.pop()
+            if let w = window { onEnd?(w) }
+        }
+    }
+}

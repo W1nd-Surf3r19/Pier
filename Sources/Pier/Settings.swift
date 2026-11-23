@@ -50,6 +50,31 @@ struct SettingsView: View {
 
 struct AppearanceTab: View {
     @ObservedObject var store = DockStore.shared
+    @ObservedObject var widgets = WidgetModel.shared
+
+    /// „main“, „all“ oder die UUID eines Bildschirms.
+    private var screenChoice: Binding<String> {
+        Binding(get: { store.settings.allScreens ? "all" : (store.settings.screenUUID ?? "main") },
+                set: { v in
+                    store.settings.allScreens = v == "all"
+                    store.settings.screenUUID = v == "all" || v == "main" ? nil : v
+                })
+    }
+
+    private var positionNote: String {
+        if store.settings.style == .bar {
+            return "Die schlanke Leiste sitzt immer unten – seitlich gibt es nur die Pille. Beschriftung „Automatisch“ zeigt den Namen nur, wenn genug Platz ist. „Fenster gruppieren: Automatisch“ fasst die Fenster einer App erst zusammen, wenn es eng wird."
+        }
+        if store.settings.isFree {
+            return "Frei: Zieh die Pille am Griff (≡) an eine beliebige Stelle. Dort bleibt sie, auch nach einem Neustart."
+        }
+        return "Ausrichtung schiebt die Pille an den Anfang oder das Ende ihrer Kante, „Frei“ macht sie frei verschiebbar."
+    }
+
+    private var customColor: Binding<Color> {
+        Binding(get: { Color(nsColor: NSColor(hex: store.settings.customColor) ?? .systemBlue) },
+                set: { store.settings.customColor = NSColor($0).hexString })
+    }
 
     var body: some View {
         Form {
@@ -65,15 +90,26 @@ struct AppearanceTab: View {
             } header: { Text("Stil") }
 
             Section {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 12) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 12) {
                     ForEach(DockTheme.allCases) { theme in
-                        ThemeChoice(theme: theme, selected: store.settings.theme == theme) {
+                        // Vorschau von „Now Playing“: aktuelles Cover, sonst eine Beispielfarbe.
+                        let art = theme == .nowPlaying ? Color(nsColor: widgets.artworkColor ?? .systemPink) : nil
+                        ThemeChoice(theme: theme, colors: theme.colors(custom: customColor.wrappedValue, artwork: art),
+                                    selected: store.settings.theme == theme) {
                             store.settings.theme = theme
                         }
                     }
                 }
                 .padding(.vertical, 4)
-            } header: { Text("Farbthema") }
+                if store.settings.theme == .custom {
+                    ColorPicker("Eigene Farbe", selection: customColor, supportsOpacity: false)
+                }
+            } header: { Text("Farbthema") } footer: {
+                if store.settings.theme == .nowPlaying {
+                    Text("Färbt Dock und Akzent nach dem Cover des Titels, der gerade in Music oder Spotify läuft. Ohne Musik sieht es aus wie „System“. Beim ersten Mal fragt macOS, ob Pier die App steuern darf.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
 
             Section {
                 LabeledContent("Icon-Größe") {
@@ -91,23 +127,42 @@ struct AppearanceTab: View {
                 }
                 .pickerStyle(.segmented)
                 .disabled(store.settings.style == .bar)
+                Picker("Ausrichtung", selection: $store.settings.placement) {
+                    ForEach(PillPlacement.allCases) { Text($0.title(vertical: store.settings.edge.isVertical)).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .disabled(store.settings.style == .bar)
                 Picker("Beschriftung der Leiste", selection: $store.settings.barLabels) {
                     ForEach(BarLabels.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .disabled(store.settings.style != .bar)
-                Toggle("Dock automatisch ausblenden", isOn: $store.settings.autoHide)
-                Toggle("Dock auf allen Bildschirmen", isOn: $store.settings.allScreens)
-            } footer: {
-                if store.settings.style == .bar {
-                    Text("Die schlanke Leiste sitzt immer unten – seitlich gibt es nur die Pille. Beschriftung „Automatisch“ zeigt den Namen nur, wenn genug Platz ist; „Icon und Text“ kürzt ihn notfalls.")
-                        .font(.caption).foregroundStyle(.secondary)
+                Picker("Fenster gruppieren", selection: $store.settings.windowGrouping) {
+                    ForEach(WindowGrouping.allCases) { Text($0.title).tag($0) }
                 }
+                .pickerStyle(.segmented)
+                .disabled(store.settings.style != .bar)
+                Picker("Bildschirm", selection: screenChoice) {
+                    Text("Hauptbildschirm").tag("main")
+                    ForEach(NSScreen.screens, id: \.displayID) { s in
+                        if let uuid = s.uuid { Text(s.localizedName).tag(uuid) }
+                    }
+                    Text("Alle Bildschirme").tag("all")
+                }
+                Toggle("Dock automatisch ausblenden", isOn: $store.settings.autoHide)
+                    .disabled(store.settings.isFree)
+            } footer: {
+                Text(positionNote).font(.caption).foregroundStyle(.secondary)
             }
 
             Section {
                 Toggle("Apps-Kachel (Launcher) anzeigen", isOn: $store.settings.showLauncher)
                 Toggle("Laufende, nicht angepinnte Apps anzeigen", isOn: $store.settings.showRunningApps)
+                Picker("Reihenfolge laufender Apps", selection: $store.settings.runningOrder) {
+                    ForEach(RunningOrder.allCases) { Text($0.title).tag($0) }
+                }
+                .disabled(!store.settings.showRunningApps)
+                .help("Angepinnte Apps bleiben immer in deiner Reihenfolge.")
                 Toggle("Fenster-Vorschau beim Darüberfahren", isOn: $store.settings.windowPreviews)
                 Toggle("Klick auf aktive App blendet sie aus", isOn: $store.settings.clickHidesActiveApp)
                 Toggle("Scrollen über einem Icon wechselt die Fenster", isOn: $store.settings.scrollCyclesWindows)
@@ -119,9 +174,9 @@ struct AppearanceTab: View {
 
             Section {
                 Toggle("Fenster automatisch über dem Dock halten", isOn: $store.settings.fitWindows)
-                    .disabled(store.settings.autoHide || store.settings.effectiveEdge != .bottom)
+                    .disabled(store.settings.autoHide || store.settings.effectiveEdge != .bottom || store.settings.isFree)
             } footer: {
-                Text("Wird ein Fenster so groß gezogen oder gezoomt, dass es unter das Dock reicht, kürzt Pier es bis zur Oberkante. Bei „automatisch ausblenden“ nicht nötig, und nur für das Dock unten.")
+                Text("Wird ein Fenster so groß gezogen oder gezoomt, dass es unter das Dock reicht, kürzt Pier es bis zur Oberkante. Bei „automatisch ausblenden“ nicht nötig, und nur für das Dock unten (nicht frei schwebend).")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -183,6 +238,7 @@ struct StyleChoice: View {
 /// Vorschau eines Farbthemas: getöntes Glas mit dem Akzent-Strich der aktiven App.
 struct ThemeChoice: View {
     let theme: DockTheme
+    let colors: ThemeColors
     let selected: Bool
     let action: () -> Void
 
@@ -199,10 +255,10 @@ struct ThemeChoice: View {
                         RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.regularMaterial)
                     }
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(LinearGradient(colors: theme.glass.isEmpty ? [.clear] : theme.glass.map { $0.opacity(0.55) },
+                        .fill(LinearGradient(colors: colors.glass.isEmpty ? [.clear] : colors.glass.map { $0.opacity(0.55) },
                                              startPoint: .topLeading, endPoint: .bottomTrailing))
-                    Capsule().fill(theme.accent).frame(width: 22, height: 3.5)
-                        .shadow(color: theme.accent.opacity(0.6), radius: 3)
+                    Capsule().fill(colors.accent).frame(width: 22, height: 3.5)
+                        .shadow(color: colors.accent.opacity(0.6), radius: 3)
                         .padding(.bottom, 7)
                 }
                 .frame(height: 44)
@@ -211,6 +267,7 @@ struct ThemeChoice: View {
                         .strokeBorder(selected ? Color.accentColor : Color.primary.opacity(0.12), lineWidth: selected ? 2.5 : 1)
                 )
                 Text(theme.title).font(.system(size: 11, weight: selected ? .semibold : .regular))
+                    .lineLimit(1).minimumScaleFactor(0.8)
             }
         }
         .buttonStyle(.plain)
@@ -245,6 +302,7 @@ struct AppsTab: View {
                     case .folder(let f): FolderRow(folder: f)
                     case .stack(let s): StackRow(stack: s)
                     case .separator(let s): SeparatorRow(separator: s)
+                    case .file(let f): FileRow(file: f)
                     }
                 }
                 .onMove { store.moveEntries(from: $0, to: $1) }
@@ -260,6 +318,7 @@ struct AppsTab: View {
                     .help("Einen Finder-Ordner (z. B. Downloads) als Stapel ins Dock legen")
                 Spacer()
                 Menu("Mehr") {
+                    Button("Datei hinzufügen…") { store.addFiles(pickFiles()) }
                     Button("Trennlinie hinzufügen") { store.addSeparator() }
                     Button("Apps vom Mac-Dock übernehmen") { store.resetFromSystemDock() }
                 }
@@ -299,14 +358,46 @@ func pickApps() -> [URL] {
 }
 
 @MainActor
-func pickFolders() -> [URL] {
+func pickFolders(prompt: String = "Als Stapel hinzufügen",
+                 directory: URL? = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first) -> [URL] {
     let p = NSOpenPanel()
     p.allowsMultipleSelection = true
     p.canChooseDirectories = true
     p.canChooseFiles = false
-    p.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-    p.prompt = "Als Stapel hinzufügen"
+    p.directoryURL = directory
+    p.prompt = prompt
     return p.runModal() == .OK ? p.urls : []
+}
+
+@MainActor
+func pickFiles() -> [URL] {
+    let p = NSOpenPanel()
+    p.allowsMultipleSelection = true
+    p.canChooseDirectories = false
+    p.prompt = "Ins Dock legen"
+    return p.runModal() == .OK ? p.urls : []
+}
+
+struct FileRow: View {
+    let file: DockFile
+    @ObservedObject var store = DockStore.shared
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(nsImage: IconCache.icon(forPath: file.path)).resizable().frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(file.name)
+                Text(file.path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            }
+            Spacer()
+            Button { store.removeEntry(file.id) } label: {
+                Image(systemName: "minus.circle.fill").foregroundStyle(.red.opacity(0.85))
+            }
+            .buttonStyle(.plain)
+            .help("Datei entfernen")
+        }
+        .padding(.vertical, 2)
+    }
 }
 
 struct StackRow: View {
@@ -409,11 +500,15 @@ struct WidgetsTab: View {
             Section {
                 Toggle("Uhrzeit", isOn: $store.settings.showClock)
                 Toggle("Datum unter der Uhrzeit", isOn: $store.settings.showDate).disabled(!store.settings.showClock)
-                Toggle("Akku", isOn: $store.settings.showBattery)
+                Toggle("Akku (darüberfahren zeigt Zustand und Ladezyklen)", isOn: $store.settings.showBattery)
+                Toggle("Ton: Ausgang und Eingang wechseln", isOn: $store.settings.showSound)
+                Toggle("Geräte: externe Laufwerke auswerfen", isOn: $store.settings.showDevices)
+                Toggle("Bluetooth-Geräte in der Geräte-Liste", isOn: $store.settings.showBluetooth)
+                    .disabled(!store.settings.showDevices)
                 Toggle("Aktuelle Musik (Apple Music, Spotify)", isOn: $store.settings.showNowPlaying)
                 Toggle("Badges, Fortschritt und Hinweise an App-Icons", isOn: $store.settings.showBadges)
             } header: { Text("Im Dock anzeigen") } footer: {
-                Text("Die Musik-Anzeige erscheint, sobald Music oder Spotify einen Titel startet oder pausiert. Badges übernimmt Pier vom ausgeblendeten Mac-Dock (braucht Bedienungshilfen).")
+                Text("Darüberfahren über die Uhr zeigt Kalender und Zifferblatt. Die Musik-Anzeige erscheint, sobald Music oder Spotify einen Titel startet oder pausiert. Badges übernimmt Pier vom ausgeblendeten Mac-Dock (braucht Bedienungshilfen). Die Geräte-Kachel erscheint, sobald ein Laufwerk angeschlossen ist oder Bluetooth eingeschaltet ist; macOS fragt beim ersten Öffnen nach der Bluetooth-Erlaubnis.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -447,6 +542,25 @@ struct GeneralTab: View {
             }
 
             Section {
+                ForEach(store.settings.launcherFolders, id: \.self) { path in
+                    HStack(spacing: 10) {
+                        Image(nsImage: IconCache.icon(forPath: path)).resizable().frame(width: 20, height: 20)
+                        Text(FileManager.default.displayName(atPath: path))
+                        Spacer()
+                        Button { store.settings.launcherFolders.removeAll { $0 == path } } label: {
+                            Image(systemName: "minus.circle.fill").foregroundStyle(.red.opacity(0.85))
+                        }
+                        .buttonStyle(.plain)
+                        .help("Aus dem Launcher entfernen")
+                    }
+                }
+                Button { addLauncherFolders() } label: { Label("Ordner hinzufügen…", systemImage: "plus") }
+            } header: { Text("Eigene Ordner im Launcher") } footer: {
+                Text("Erscheinen im Launcher unter „Ordner“ neben Benutzerordner, Schreibtisch, Dokumenten, Downloads und Programmen.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
+            Section {
                 PermissionRow(title: "Bedienungshilfen", detail: "Für Fensterliste, Fenster nach vorne holen und Musiksteuerung.",
                               granted: running.axTrusted, request: Permissions.requestAccessibility)
                 PermissionRow(title: "Bildschirmaufnahme", detail: "Nur für die Live-Vorschaubilder der Fenster.",
@@ -462,6 +576,15 @@ struct GeneralTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+extension GeneralTab {
+    @MainActor
+    func addLauncherFolders() {
+        for u in pickFolders(prompt: "Hinzufügen", directory: nil) where !store.settings.launcherFolders.contains(u.standardizedFileURL.path) {
+            store.settings.launcherFolders.append(u.standardizedFileURL.path)
+        }
     }
 }
 

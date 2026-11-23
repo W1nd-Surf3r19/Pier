@@ -157,7 +157,7 @@ enum SmartArranger {
             case .folder(let f):
                 keep.append(e)
                 f.apps.forEach { inFolders.insert($0.key) }
-            case .stack: keep.append(e)
+            case .stack, .file: keep.append(e)
             case .separator: break   // werden neu gesetzt
             }
         }

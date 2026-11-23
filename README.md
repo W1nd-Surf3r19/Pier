@@ -6,15 +6,17 @@ Ein eigener Dock-Ersatz für macOS, gebaut mit Swift und SwiftUI. Pier blendet d
 
 **Dock**
 - Zwei Stile: schwebende Pille (Launcher · Apps · Widgets) oder durchgehende Leiste
-- Position unten, links, rechts oder oben (gilt nur für die Pille, die Leiste ist immer unten), auf Wunsch auf allen Bildschirmen
+- Position unten, links, rechts oder oben (gilt nur für die Pille, die Leiste ist immer unten); die Pille sitzt in der Mitte, am Anfang oder am Ende ihrer Kante oder schwebt frei (am Griff ziehen, die Stelle bleibt gespeichert)
+- Bildschirm wählbar: Hauptbildschirm, ein bestimmter Bildschirm oder alle
 - Automatisches Ausblenden
-- Neun Farbthemen (System, Graphit, Mitternacht, Ozean, Lavendel, Koralle, Salbei, Abendrot, Transparent): Akzentfarbe für die aktive App, Fortschritt und Auswahl sowie eine leichte Tönung des Glases von Dock, Popups, Launcher und ⌥Tab. „Transparent“ lässt das Glas im Dock ganz weg
+- Farbthemen (System, Graphit, Mitternacht, Ozean, Lavendel, Koralle, Salbei, Abendrot, Transparent, eigene Farbe und „Now Playing“, das sich nach dem Cover des laufenden Titels in Music oder Spotify färbt): Akzentfarbe für die aktive App, Fortschritt und Auswahl sowie eine leichte Tönung des Glases von Dock, Popups, Launcher und ⌥Tab. „Transparent“ lässt das Glas im Dock ganz weg
 - Beschriftung der Leiste: automatisch (Name nur bei genug Platz), nur Icons oder immer Icon und Text
 - Badges: in breiten Leisten-Tabs groß und rot rechts im Tab, sonst klein am Icon, dazu im Tooltip (die Werte kommen aus dem versteckten Mac-Dock)
 - Aufmerksamkeit: Erscheint oder steigt ein Badge, blinkt die ganze Kachel
 - App-Fortschritt: Downloads und Kopiervorgänge füllen den Tab und zeigen „14 %“; die Titelposition von Music, Spotify und VLC erscheint als grüner Balken (Music und VLC fragen beim ersten Mal nach der Erlaubnis, sie zu steuern)
 - App-Status: startende Apps mit wandernden Streifen, Apps, die nicht reagieren, mit roten Streifen und „Reagiert nicht“; ausgeblendete Apps und minimierte Fenster abgeblendet
-- Anpinnen und Lösen über das Kontextmenü, Drag & Drop (Datei auf App öffnet sie, `.app` pinnt an, Ordner wird zum Stapel)
+- Anpinnen und Lösen über das Kontextmenü, Drag & Drop (Datei auf App öffnet sie, `.app` pinnt an, Ordner wird zum Stapel, andere Dateien auf freier Fläche werden angepinnt)
+- Reihenfolge der laufenden, nicht angepinnten Apps: nach Start oder alphabetisch (angepinnte bleiben in deiner Reihenfolge)
 - Finder-Stapel mit den neuesten Dateien eines Ordners
 - „Intelligent anordnen“: gruppiert Apps nach Kategorie und Nutzung, mit Trennlinien und verschiebbaren Gruppen
 - ⌃ halten zeigt CPU- und Speicherverbrauch der laufenden Apps
@@ -22,6 +24,7 @@ Ein eigener Dock-Ersatz für macOS, gebaut mit Swift und SwiftUI. Pier blendet d
 
 **Fenster**
 - Fenster-Vorschau beim Überfahren, Fenster lassen sich aus der Vorschau ziehen
+- Fenster gruppieren (Leiste): nie, immer oder automatisch, sobald die Tabs zu schmal werden; ein gemeinsamer Tab zeigt die Zahl der Fenster
 - Scrollen über einem Icon wechselt zwischen den Fenstern der App
 - Filter auf den aktuellen Space
 - ⌥Tab-Umschalter: ⌥ halten, mit Tab (⇧Tab rückwärts) wählen, ⌥ loslassen wechselt, ⌥Esc bricht ab
@@ -29,15 +32,19 @@ Ein eigener Dock-Ersatz für macOS, gebaut mit Swift und SwiftUI. Pier blendet d
 - Fenster, die unter das Dock reichen würden, werden bis zu dessen Oberkante gekürzt
 
 **Launcher und Widgets**
-- Launchpad-Ersatz mit Sofortsuche, öffnet über die Dock-Kachel oder ⌥ Leertaste
+- Launchpad-Ersatz mit Sofortsuche über Apps, Bereiche der Systemeinstellungen und Ordner (Benutzerordner plus eigene), öffnet über die Dock-Kachel oder ⌥ Leertaste
 - ⌃⌥1–9 startet die n-te App
-- Musik-Widget für Music und Spotify mit Steuerung über die Medientasten
+- Musik-Widget für Music und Spotify mit Steuerung über die Medientasten; in der Leiste wird stattdessen der Tab des Players breiter und zeigt Titel, Interpret, Abspielen/Pause und Weiter
+- Uhr: darüberfahren zeigt Kalender (Woche ab Montag) und Zifferblatt
+- Akku: darüberfahren zeigt Restlaufzeit, maximale Kapazität, Zustand und Ladezyklen
+- Ton: Ausgang und Eingang per Klick wechseln
+- Geräte: externe Laufwerke einzeln oder alle auswerfen, auf Wunsch gekoppelte Bluetooth-Geräte verbinden oder trennen
 
 ## Voraussetzungen
 
 - macOS 15 oder neuer
 - Swift 6 (Xcode oder Command Line Tools)
-- Berechtigungen unter *Systemeinstellungen › Datenschutz & Sicherheit*: **Bedienungshilfen** (für Fenster, Badges und Tastenkürzel) und **Bildschirmaufnahme** (für die Fenster-Vorschau)
+- Berechtigungen unter *Systemeinstellungen › Datenschutz & Sicherheit*: **Bedienungshilfen** (für Fenster, Badges und Tastenkürzel) und **Bildschirmaufnahme** (für die Fenster-Vorschau); **Bluetooth** nur, wenn die Bluetooth-Liste eingeschaltet ist (macOS fragt beim ersten Öffnen)
 
 ## Bauen und installieren
 

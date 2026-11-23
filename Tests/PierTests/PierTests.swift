@@ -217,3 +217,133 @@ private func allAppKeys(_ entries: [DockEntry]) -> [String] {
     #expect(BarItemView.title("Xcode", progress: 0.5, hung: true) == "Reagiert nicht · Xcode")
     #expect(BarItemView.title("Mail", progress: nil, hung: false) == "Mail")
 }
+
+// MARK: Block 1 + 2 (uBar-Funktionen)
+
+@Test func newSettingsSurviveRoundTrip() throws {
+    var s = DockSettings()
+    s.screenUUID = "ABC-123"
+    s.placement = .free
+    s.freeOrigin = CGPoint(x: 0.25, y: 0.75)
+    s.runningOrder = .alphabetical
+    s.windowGrouping = .always
+    s.customColor = "#FF8800"
+    s.showSound = false
+    s.showDevices = false
+    s.showBluetooth = true
+    s.launcherFolders = ["/tmp/a"]
+    s.theme = .nowPlaying
+    let back = try JSONDecoder().decode(DockSettings.self, from: JSONEncoder().encode(s))
+    #expect(back == s)
+}
+
+@Test func oldConfigFallsBackToDefaults() throws {
+    let back = try JSONDecoder().decode(DockSettings.self, from: Data(#"{"style":"bar"}"#.utf8))
+    var expected = DockSettings()
+    expected.style = .bar
+    #expect(back == expected)
+}
+
+@Test func pinnedFileRoundTripsAndSurvivesArranging() throws {
+    let file = DockFile(url: URL(fileURLWithPath: "/tmp/Notiz.txt"))
+    let entries: [DockEntry] = [.file(file)]
+    #expect(try JSONDecoder().decode([DockEntry].self, from: JSONEncoder().encode(entries)) == entries)
+    let plan = SmartArranger.plan(entries: entries, add: [], options: .init(), score: { _ in 0 },
+                                  isRare: { _ in false }, category: { _ in .other })
+    #expect(plan.entries.contains(.file(file)))
+}
+
+@Test func monthGridStartsOnMonday() {
+    let cal = MonthGrid.calendar
+    let nov = cal.date(from: DateComponents(year: 2026, month: 11, day: 15))!
+    let cells = MonthGrid.cells(for: nov, calendar: cal)
+    // 1.11.2026 ist ein Sonntag → 7. Spalte.
+    #expect(cells.prefix(6).allSatisfy { $0 == nil })
+    #expect(cells[6].map { cal.component(.day, from: $0) } == 1)
+    #expect(cells.count == 6 + 30)
+    let jun = cal.date(from: DateComponents(year: 2026, month: 6, day: 1))!   // Montag
+    #expect(MonthGrid.cells(for: jun, calendar: cal).first! != nil)
+}
+
+@Test func pillPlacementAlongEdges() {
+    let sf = CGRect(x: 0, y: 0, width: 1000, height: 800)
+    let vf = CGRect(x: 0, y: 0, width: 1000, height: 770)
+    let size = CGSize(width: 200, height: 60)
+    func o(_ e: DockEdge, _ p: PillPlacement) -> CGPoint {
+        DockController.pillOrigin(edge: e, placement: p, size: size, screen: sf, visible: vf, gap: 8)
+    }
+    #expect(o(.bottom, .start) == CGPoint(x: 8, y: 8))
+    #expect(o(.bottom, .center) == CGPoint(x: 400, y: 8))
+    #expect(o(.bottom, .end) == CGPoint(x: 792, y: 8))
+    #expect(o(.top, .end) == CGPoint(x: 792, y: 702))
+    let tall = CGSize(width: 60, height: 200)
+    #expect(DockController.pillOrigin(edge: .left, placement: .start, size: tall, screen: sf, visible: vf, gap: 8) == CGPoint(x: 8, y: 562))
+    #expect(DockController.pillOrigin(edge: .right, placement: .end, size: tall, screen: sf, visible: vf, gap: 8) == CGPoint(x: 932, y: 8))
+}
+
+@Test func freePositionStaysOnScreen() {
+    let vf = CGRect(x: 100, y: 50, width: 1000, height: 700)
+    let size = CGSize(width: 200, height: 60)
+    let frame = CGRect(x: 500, y: 300, width: 200, height: 60)
+    let f = DockController.freeFraction(of: frame, visible: vf)
+    #expect(DockController.freeOrigin(f, size: size, visible: vf) == frame.origin)
+    // Weit außerhalb gezogen → an den Rand geklemmt.
+    let off = DockController.freeFraction(of: CGRect(x: -900, y: 5000, width: 200, height: 60), visible: vf)
+    #expect(DockController.freeOrigin(off, size: size, visible: vf) == CGPoint(x: 100, y: 690))
+    #expect(DockController.freeOrigin(nil, size: size, visible: vf) == nil)
+}
+
+@Test func runningAppsOrder() {
+    let items: [(String, Date?)] = [("Zed", Date(timeIntervalSince1970: 10)), ("arc", Date(timeIntervalSince1970: 30)),
+                                    ("Mail", nil), ("Bär", Date(timeIntervalSince1970: 20))]
+    let byLaunch = RunningAppsModel.ordered(items, by: .launch, name: \.0, launched: \.1).map(\.0)
+    #expect(byLaunch == ["Mail", "Zed", "Bär", "arc"])
+    let byName = RunningAppsModel.ordered(items, by: .alphabetical, name: \.0, launched: \.1).map(\.0)
+    #expect(byName == ["arc", "Bär", "Mail", "Zed"])
+}
+
+@Test func batteryCapacityPercent() {
+    // Werte dieses Macs: Systemeinstellungen zeigen 100 %.
+    #expect(BatteryHealth.percent(nominal: 4718, design: 4629) == 100)
+    #expect(BatteryHealth.percent(nominal: 3700, design: 4629) == 80)
+    #expect(BatteryHealth.percent(nominal: 0, design: 4629) == nil)
+}
+
+@Test func windowGroupingDecision() {
+    #expect(!TabRow.useGrouped(.never, widthPerTab: 10))
+    #expect(TabRow.useGrouped(.always, widthPerTab: 500))
+    #expect(TabRow.useGrouped(.automatic, widthPerTab: 60))
+    #expect(!TabRow.useGrouped(.automatic, widthPerTab: 120))
+}
+
+@Test func colorHelpers() {
+    #expect(NSColor(hex: "#3478F6")?.hexString == "#3478F6")
+    #expect(NSColor(hex: "nope") == nil)
+    var b: CGFloat = 0
+    ArtworkColor.accent(.black).usingColorSpace(.sRGB)!.getHue(nil, saturation: nil, brightness: &b, alpha: nil)
+    #expect(b >= 0.54)
+    #expect(DockTheme.system.colors(custom: .red, artwork: .blue) == ThemeColors.fallback)
+    #expect(DockTheme.custom.colors(custom: .red, artwork: nil).accent == .red)
+    #expect(DockTheme.nowPlaying.colors(custom: .red, artwork: nil) == ThemeColors.fallback)
+}
+
+@Test func artworkAverageFindsDominantColor() {
+    let img = NSImage(size: NSSize(width: 8, height: 8), flipped: false) { r in
+        NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1).setFill()
+        r.fill()
+        return true
+    }
+    let c = ArtworkColor.average(img)!.usingColorSpace(.sRGB)!
+    #expect(c.redComponent > 0.8 && c.greenComponent < 0.2 && c.blueComponent < 0.2)
+}
+
+@Test func artworkAverageMixesWholeImage() {
+    // Halb schwarz, halb weiß → mittleres Grau, nicht die Farbe eines einzelnen Punkts.
+    let img = NSImage(size: NSSize(width: 8, height: 8), flipped: false) { r in
+        NSColor.black.setFill(); NSRect(x: 0, y: 0, width: 4, height: 8).fill()
+        NSColor.white.setFill(); NSRect(x: 4, y: 0, width: 4, height: 8).fill()
+        return true
+    }
+    let c = ArtworkColor.average(img)!
+    #expect(c.redComponent > 0.35 && c.redComponent < 0.65)
+}

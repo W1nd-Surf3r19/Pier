@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 /// Verkleinerung der Icons, damit die Pille auf ihren Bildschirm passt – je Dock eigener Wert.
@@ -10,6 +11,12 @@ final class DockFit: ObservableObject {
 extension NSScreen {
     var displayID: CGDirectDisplayID {
         (deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? 0
+    }
+
+    /// Bleibt über Neustarts und Umstecken gleich – anders als `displayID`.
+    var uuid: String? {
+        guard let u = CGDisplayCreateUUIDFromDisplayID(displayID)?.takeRetainedValue() else { return nil }
+        return CFUUIDCreateString(nil, u) as String?
     }
 }
 
@@ -32,6 +39,7 @@ final class DockController {
     private var shapeTimer: Timer?
     private var fillets: [Fillet] = []
     private var shapeSize: CGSize = .zero
+    private var themeSub: AnyCancellable?
 
     /// Hohlkehle an der unteren Ecke eines angedockten Fensters (x in Panel-Koordinaten).
     struct Fillet: Equatable {
@@ -70,6 +78,10 @@ final class DockController {
         hosting.autoresizingMask = [.width, .height]
         container.addSubview(hosting)
         hosting.rootView = DockRootView(fit: fit, onSize: { [weak self] size in self?.contentSizeChanged(size) })
+        // Tönung folgt den aufgelösten Farben – auch wenn nur das Cover wechselt.
+        themeSub = ThemeModel.shared.$colors.sink { [weak self] c in
+            self?.tint.colors = c.glass.isEmpty ? nil : c.glass.map { NSColor($0).withAlphaComponent(0.2).cgColor }
+        }
 
         screenObserver = NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in
@@ -103,7 +115,6 @@ final class DockController {
         // Ohne Glas würde der Fensterschatten jedes Icon einzeln umranden.
         panel.hasShadow = !s.theme.isClear
         panel.invalidateShadow()
-        tint.colors = s.theme.glass.isEmpty ? nil : s.theme.glass.map { NSColor($0).withAlphaComponent(0.2).cgColor }
         if s.style == .bar {
             // Leiste unten im Panel, darüber ein transparenter Streifen für die Hohlkehlen.
             hosting.frame = NSRect(x: 0, y: 0, width: panel.frame.width, height: DockMetrics.barHeight(s))
@@ -116,7 +127,11 @@ final class DockController {
             shapeTimer?.invalidate()
             shapeTimer = nil
         }
-        if !s.autoHide { concealed = false }
+        if !s.autoHide || s.isFree {
+            concealed = false
+            hideTimer?.invalidate()
+            hideTimer = nil
+        }
         if styleChanged, s.style == .pill {
             hosting.layoutSubtreeIfNeeded()
             // Vor dem ersten Anzeigen kann die Größe noch 0 sein – dann liefert onSize sie nach.
@@ -164,20 +179,13 @@ final class DockController {
             let h = DockMetrics.barHeight(settings) + DockMetrics.filletRadius
             f = NSRect(x: sf.minX, y: sf.minY, width: sf.width, height: h)
         case .pill:
-            // Seitlich senkrecht zentriert im Bereich unter der Menüleiste.
             let vf = screen.visibleFrame
-            let w = min(ceil(pillSize.width), sf.width - 16)
-            let h = min(ceil(pillSize.height), vf.height - 16)
-            switch settings.effectiveEdge {
-            case .bottom:
-                f = NSRect(x: (sf.midX - w / 2).rounded(), y: sf.minY + gap, width: w, height: h)
-            case .top:
-                f = NSRect(x: (sf.midX - w / 2).rounded(), y: vf.maxY - h - gap, width: w, height: h)
-            case .left:
-                f = NSRect(x: sf.minX + gap, y: (vf.midY - h / 2).rounded(), width: w, height: h)
-            case .right:
-                f = NSRect(x: sf.maxX - w - gap, y: (vf.midY - h / 2).rounded(), width: w, height: h)
-            }
+            let size = CGSize(width: min(ceil(pillSize.width), sf.width - 16), height: min(ceil(pillSize.height), vf.height - 16))
+            let origin = settings.isFree
+                ? Self.freeOrigin(settings.freeOrigin, size: size, visible: vf)
+                    ?? Self.pillOrigin(edge: settings.effectiveEdge, placement: .center, size: size, screen: sf, visible: vf, gap: gap)
+                : Self.pillOrigin(edge: settings.effectiveEdge, placement: settings.placement, size: size, screen: sf, visible: vf, gap: gap)
+            f = NSRect(origin: origin, size: size)
         }
         // Ausgeblendet: nur ein Stück zur Kante rutschen und unsichtbar werden. Ganz hinausschieben
         // würde das Dock auf einem angrenzenden Bildschirm auftauchen lassen.
@@ -193,11 +201,65 @@ final class DockController {
         return f
     }
 
+    /// Ecke der Pille an ihrer Kante: Anfang (links/oben), Mitte oder Ende (rechts/unten).
+    /// Seitlich im Bereich unter der Menüleiste.
+    nonisolated static func pillOrigin(edge: DockEdge, placement: PillPlacement, size: CGSize,
+                                       screen sf: CGRect, visible vf: CGRect, gap: CGFloat) -> CGPoint {
+        let w = size.width, h = size.height
+        let x: CGFloat = switch placement {
+        case .start: sf.minX + gap
+        case .end: sf.maxX - w - gap
+        case .center, .free: (sf.midX - w / 2).rounded()
+        }
+        let y: CGFloat = switch placement {
+        case .start: vf.maxY - h - gap
+        case .end: vf.minY + gap
+        case .center, .free: (vf.midY - h / 2).rounded()
+        }
+        switch edge {
+        case .bottom: return CGPoint(x: x, y: sf.minY + gap)
+        case .top: return CGPoint(x: x, y: vf.maxY - h - gap)
+        case .left: return CGPoint(x: sf.minX + gap, y: y)
+        case .right: return CGPoint(x: sf.maxX - w - gap, y: y)
+        }
+    }
+
+    /// Frei verschobene Pille: gespeicherter Anteil (0…1) des freien Bereichs, immer ganz auf dem Bildschirm.
+    nonisolated static func freeOrigin(_ fraction: CGPoint?, size: CGSize, visible vf: CGRect) -> CGPoint? {
+        guard let fraction else { return nil }
+        let fx = min(max(fraction.x, 0), 1), fy = min(max(fraction.y, 0), 1)
+        return CGPoint(x: (vf.minX + fx * max(vf.width - size.width, 0)).rounded(),
+                       y: (vf.minY + fy * max(vf.height - size.height, 0)).rounded())
+    }
+
+    /// Umkehrung von `freeOrigin`: wo die Pille nach dem Ziehen steht, als Anteil.
+    nonisolated static func freeFraction(of frame: CGRect, visible vf: CGRect) -> CGPoint {
+        let sx = max(vf.width - frame.width, 1), sy = max(vf.height - frame.height, 1)
+        return CGPoint(x: min(max((frame.minX - vf.minX) / sx, 0), 1), y: min(max((frame.minY - vf.minY) / sy, 0), 1))
+    }
+
+    /// Nach dem Ziehen am Griff: Position merken (gilt für alle Docks) und einrasten.
+    func movedByUser() {
+        guard settings.isFree, let vf = screen?.visibleFrame else { return }
+        DockStore.shared.settings.freeOrigin = Self.freeFraction(of: panel.frame, visible: vf)
+        // Bleibt der Anteil gleich (z. B. über den Rand hinaus gezogen), kommt kein apply – selbst einrasten.
+        layout(animated: true)
+    }
+
+    /// Kante, an der Popups andocken. Die frei schwebende Pille öffnet sie zur Bildschirmmitte hin.
+    private var popupEdge: DockEdge {
+        guard settings.isFree, let vf = screen?.visibleFrame else { return settings.effectiveEdge }
+        let f = panel.frame
+        if settings.effectiveEdge.isVertical { return f.midX < vf.midX ? .left : .right }
+        return f.midY < vf.midY ? .bottom : .top
+    }
+
     /// Wo ein Popup (Vorschau, Ordner, Stapel) neben diesem Dock erscheint.
     func popupFrame(size: CGSize, anchor: CGRect) -> NSRect {
         let vf = screen?.visibleFrame ?? panel.frame
         let gap: CGFloat = 8
-        switch settings.effectiveEdge {
+        let edge = popupEdge
+        switch edge {
         case .bottom:
             let x = min(max(anchor.midX - size.width / 2, vf.minX + gap), vf.maxX - size.width - gap)
             return NSRect(x: x.rounded(), y: (visibleTop + gap).rounded(), width: size.width, height: size.height)
@@ -206,7 +268,7 @@ final class DockController {
             return NSRect(x: x.rounded(), y: (panel.frame.minY - gap - size.height).rounded(), width: size.width, height: size.height)
         case .left, .right:
             let y = min(max(anchor.midY - size.height / 2, vf.minY + gap), vf.maxY - size.height - gap)
-            let x = settings.effectiveEdge == .left ? panel.frame.maxX + gap : panel.frame.minX - size.width - gap
+            let x = edge == .left ? panel.frame.maxX + gap : panel.frame.minX - size.width - gap
             return NSRect(x: x.rounded(), y: y.rounded(), width: size.width, height: size.height)
         }
     }
@@ -344,7 +406,7 @@ final class DockController {
     // MARK: Automatisch ausblenden
 
     private func mouseMoved() {
-        guard settings.autoHide, let sf = screen?.frame else { return }
+        guard settings.autoHide, !settings.isFree, let sf = screen?.frame else { return }
         let p = NSEvent.mouseLocation
         if concealed {
             let atEdge: Bool = switch settings.effectiveEdge {
