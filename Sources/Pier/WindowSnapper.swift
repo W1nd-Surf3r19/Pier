@@ -88,9 +88,9 @@ final class WindowSnapper {
             target = CGRect(x: (ax.midX - w / 2).rounded(), y: (ax.midY - h / 2).rounded(), width: w, height: h)
         }
         // Position – Größe – Position: manche Apps begrenzen die Größe sonst an der alten Stelle.
-        set(window, origin: target.origin)
-        set(window, size: target.size)
-        set(window, origin: target.origin)
+        WindowService.setOrigin(window, target.origin)
+        WindowService.setSize(window, target.size)
+        WindowService.setOrigin(window, target.origin)
     }
 
     // MARK: AX-Helfer
@@ -107,15 +107,5 @@ final class WindowSnapper {
         AXValueGetValue(pv, .cgPoint, &p)
         AXValueGetValue(sv, .cgSize, &s)
         return CGRect(origin: p, size: s)
-    }
-
-    private func set(_ w: AXUIElement, origin: CGPoint) {
-        var o = origin
-        if let v = AXValueCreate(.cgPoint, &o) { AXUIElementSetAttributeValue(w, kAXPositionAttribute as CFString, v) }
-    }
-
-    private func set(_ w: AXUIElement, size: CGSize) {
-        var s = size
-        if let v = AXValueCreate(.cgSize, &s) { AXUIElementSetAttributeValue(w, kAXSizeAttribute as CFString, v) }
     }
 }

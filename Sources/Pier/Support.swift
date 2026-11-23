@@ -105,6 +105,12 @@ struct HoverTracker: NSViewRepresentable {
     }
 }
 
+extension CGRect {
+    func inset(by e: NSEdgeInsets) -> CGRect {
+        CGRect(x: minX + e.left, y: minY + e.top, width: width - e.left - e.right, height: height - e.top - e.bottom)
+    }
+}
+
 extension View {
     func onHoverAlways(_ action: @escaping (Bool, CGRect) -> Void) -> some View {
         background(HoverTracker(onChange: action))
@@ -346,7 +352,15 @@ struct BarResizeHandle: NSViewRepresentable {
             }
         }
 
-        override func mouseUp(with event: NSEvent) {
+        override func mouseUp(with event: NSEvent) { finish() }
+
+        // Verschwindet der Griff mitten im Ziehen (Bildschirmwechsel baut das Dock neu), trotzdem abschließen.
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if newWindow == nil { finish() }
+            super.viewWillMove(toWindow: newWindow)
+        }
+
+        private func finish() {
             guard start != nil else { return }
             start = nil
             onChange?(last, true)

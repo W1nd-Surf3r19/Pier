@@ -261,11 +261,24 @@ struct TabRow: View {
         }
     }
 
-    /// Teilt die Tabs der Reihe nach auf höchstens `rows` Zeilen auf (vordere Zeilen bekommen den Rest).
+    /// Teilt die Tabs der Reihe nach möglichst gleichmäßig auf `rows` Zeilen auf (vordere bekommen je einen mehr).
     static func split(_ items: [BarItem], rows: Int) -> [[BarItem]] {
-        guard rows > 1, items.count > 1 else { return [items] }
-        let n = Int((Double(items.count) / Double(rows)).rounded(.up))
-        return stride(from: 0, to: items.count, by: n).map { Array(items[$0..<min($0 + n, items.count)]) }
+        let rows = min(rows, items.count)
+        guard rows > 1 else { return [items] }
+        let base = items.count / rows, extra = items.count % rows
+        var result: [[BarItem]] = [], start = 0
+        for r in 0..<rows {
+            let n = base + (r < extra ? 1 : 0)
+            result.append(Array(items[start..<start + n]))
+            start += n
+        }
+        return result
+    }
+
+    /// Gezeichnete Zeilen: aufgeteilt, ohne Trennlinien am Rand, ohne leere Zeilen.
+    static func lines(_ items: [BarItem], rows: Int) -> [[BarItem]] {
+        let l = split(items, rows: rows).map(trimSeparators).filter { !$0.isEmpty }
+        return l.isEmpty ? [[]] : l
     }
 
     static func trimSeparators(_ line: [BarItem]) -> [BarItem] {
@@ -273,8 +286,10 @@ struct TabRow: View {
     }
 
     /// Schmalste Tab-Breite über alle Zeilen – alle Zeilen zeigen damit gleich breite Tabs.
+    /// Zeilen nur mit Icons (ohne breite Tabs) zählen nicht mit.
     static func widthPerTab(_ items: [BarItem], rows: Int, width: CGFloat) -> CGFloat {
-        split(items, rows: rows).map { widthPerTab($0, width: width) }.min() ?? 0
+        lines(items, rows: rows).filter { $0.contains { !$0.isCompact && !$0.isMedia } }
+            .map { widthPerTab($0, width: width) }.min() ?? 0
     }
 
     var body: some View {
@@ -285,7 +300,7 @@ struct TabRow: View {
             let per = Self.widthPerTab(items, rows: rows, width: geo.size.width)
             let showTitle = TabRow.showsTitle(labels, widthPerTab: per)
             // Trennlinien am Anfang oder Ende einer Zeile trennen nichts – weglassen.
-            let lines = Self.split(items, rows: rows).map(Self.trimSeparators)
+            let lines = Self.lines(items, rows: rows)
             VStack(alignment: .leading, spacing: DockMetrics.barRowSpacing) {
                 ForEach(lines.indices, id: \.self) { i in
                     HStack(spacing: spacing) {
@@ -351,6 +366,8 @@ struct TabColumn: View {
             }
             .frame(maxWidth: .infinity)
         }
+        // Mehr Tabs als selbst 16 pt hohe hineinpassen: unten abschneiden statt über die Widgets zu zeichnen.
+        .clipped()
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: items.map(\.id))
     }
 }

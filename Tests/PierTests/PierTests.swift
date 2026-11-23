@@ -409,8 +409,9 @@ private func allAppKeys(_ entries: [DockEntry]) -> [String] {
 @Test func tabsSplitIntoRows() {
     let items: [BarItem] = (0..<7).map { _ in .separator(UUID()) }
     #expect(TabRow.split(items, rows: 1).map(\.count) == [7])
-    #expect(TabRow.split(items, rows: 3).map(\.count) == [3, 3, 1])
-    #expect(TabRow.split(items, rows: 5).map(\.count) == [2, 2, 2, 1])
+    #expect(TabRow.split(items, rows: 3).map(\.count) == [3, 2, 2])
+    #expect(TabRow.split(items, rows: 5).map(\.count) == [2, 2, 1, 1, 1])   // alle 5 Zeilen genutzt
+    #expect(TabRow.split(Array(items.prefix(3)), rows: 5).map(\.count) == [1, 1, 1])
     #expect(TabRow.split([], rows: 3).map(\.count) == [0])
     let line: [BarItem] = [.separator(UUID()), .launcher, .separator(UUID()), .launcher, .separator(UUID())]
     #expect(TabRow.trimSeparators(line).map(\.isSeparator) == [false, true, false])
@@ -429,4 +430,21 @@ private func allAppKeys(_ entries: [DockEntry]) -> [String] {
     #expect(TabColumn.fittedHeight(tabs, height: 1000, tabHeight: 34) == 34)
     #expect(TabColumn.fittedHeight(tabs, height: 300, tabHeight: 34) == 27)   // (300 − 27) / 10
     #expect(TabColumn.fittedHeight(tabs, height: 50, tabHeight: 34) == 16)
+}
+
+
+@Test func iconOnlyRowDoesNotHideTitles() {
+    // Zeile 1 nur kompakte Einträge, Zeile 2 ein breiter Tab: die Breite kommt von Zeile 2.
+    let app = NSRunningApplication.current
+    let task = BarItem.task(TaskItem(id: "w", app: app, window: nil, title: "X", isActive: false))
+    let items: [BarItem] = [.launcher, .launcher, task]
+    #expect(TabRow.widthPerTab(items, rows: 2, width: 500) > 84)
+}
+
+@Test func oldBarConfigStaysAtBottom() throws {
+    // Vor Block 3 stand die Leiste immer unten, auch wenn „edge“ noch von der Pille links war.
+    let old = try JSONDecoder().decode(DockSettings.self, from: Data(#"{"style":"bar","edge":"left"}"#.utf8))
+    #expect(old.edge == .bottom)
+    let new = try JSONDecoder().decode(DockSettings.self, from: Data(#"{"style":"bar","edge":"left","barRows":1}"#.utf8))
+    #expect(new.edge == .left)
 }

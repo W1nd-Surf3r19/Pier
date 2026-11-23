@@ -144,6 +144,7 @@ final class Coordinator {
 
     /// Legt Docks für neue Bildschirme an und räumt die abgesteckter (oder abgewählter) ab.
     func syncDocks(_ s: DockSettings) {
+        resizingBar = false
         // Gewählter Bildschirm; ist er nicht angeschlossen, der Hauptbildschirm.
         let chosen = NSScreen.screens.first { s.screenUUID != nil && $0.uuid == s.screenUUID } ?? NSScreen.screens.first
         let screens = s.allScreens ? NSScreen.screens : (chosen.map { [$0] } ?? [])

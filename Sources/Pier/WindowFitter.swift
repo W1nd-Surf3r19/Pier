@@ -22,7 +22,7 @@ final class WindowFitter {
         let sf = screen.frame
         switch edge {
         case .bottom: let top = a.maxY; a.origin.y = max(a.minY, sf.minY + reserved); a.size.height = top - a.minY
-        case .top: a.size.height = min(a.maxY, sf.maxY - reserved) - a.minY
+        case .top: a.size.height = max(0, a.height - reserved)   // reserved = Dicke unter der Menüleiste
         case .left: let right = a.maxX; a.origin.x = max(a.minX, sf.minX + reserved); a.size.width = right - a.minX
         case .right: a.size.width = min(a.maxX, sf.maxX - reserved) - a.minX
         }
@@ -63,18 +63,42 @@ final class WindowFitter {
         guard let pos = point(window), let size = size(window) else { return }
 
         // AX-Koordinaten: Ursprung oben links am Hauptbildschirm.
-        guard let ax = Self.dockedScreen(windowOrigin: pos, screens: screens, primaryHeight: primary.frame.height),
-              let target = Self.fittedFrame(CGRect(origin: pos, size: size), screen: ax, edge: edge,
+        guard var ax = Self.dockedScreen(windowOrigin: pos, screens: screens, primaryHeight: primary.frame.height) else { return }
+        // Oben zählt der Streifen ab der Menüleiste dieses Bildschirms (Notch-Bildschirme haben eine höhere).
+        if edge == .top { ax = ax.inset(by: menuBar(ofAX: ax, primaryHeight: primary.frame.height)) }
+        guard let target = Self.fittedFrame(CGRect(origin: pos, size: size), screen: ax, edge: edge,
                                             reserved: reserved, previous: previous) else { return }
-        // Erst verkleinern, dann verschieben – sonst ragt das Fenster kurz über den Rand und macOS klemmt es.
-        set(window, size: target.size)
+        if target.width > size.width || target.height > size.height {
+            // Wächst das Fenster (Leiste wurde schmaler), erst verschieben – sonst ragte es über den anderen Rand.
+            WindowService.setOrigin(window, target.origin)
+            WindowService.setSize(window, target.size)
+            return
+        }
+        // Schrumpft es: erst verkleinern, dann verschieben – sonst ragt es kurz über den Rand und macOS klemmt es.
+        WindowService.setSize(window, target.size)
         guard target.origin != pos else { return }
         // Lehnt die App das Verkleinern ab, nur so weit verschieben, dass es noch auf den Bildschirm passt.
         let actual = self.size(window) ?? target.size
         var origin = target.origin
         if edge == .top { origin.y = max(ax.minY, min(origin.y, ax.maxY - actual.height)) }
         if edge == .left { origin.x = max(ax.minX, min(origin.x, ax.maxX - actual.width)) }
-        set(window, origin: origin)
+        WindowService.setOrigin(window, origin)
+    }
+
+    /// Fenster wurde verschoben: Nur bei der Leiste oben eingreifen – dort verschwände sonst die Titelleiste
+    /// unter der Leiste und ließe sich nicht mehr greifen. An den anderen Kanten darf man Fenster bewusst darunter schieben.
+    func moved(_ window: AXUIElement) {
+        guard reserved > 0, edge == .top, let primary = NSScreen.screens.first, let pos = point(window),
+              let ax = Self.dockedScreen(windowOrigin: pos, screens: screens, primaryHeight: primary.frame.height) else { return }
+        let limit = ax.minY + menuBar(ofAX: ax, primaryHeight: primary.frame.height).top + reserved
+        if pos.y < limit - 1 { WindowService.setOrigin(window, CGPoint(x: pos.x, y: limit)) }
+    }
+
+    /// Höhe der Menüleiste des Bildschirms mit diesem AX-Rahmen.
+    private func menuBar(ofAX ax: CGRect, primaryHeight: CGFloat) -> NSEdgeInsets {
+        let cocoa = NSRect(x: ax.minX, y: primaryHeight - ax.maxY, width: ax.width, height: ax.height)
+        guard let s = NSScreen.screens.first(where: { $0.frame == cocoa }) else { return NSEdgeInsets() }
+        return NSEdgeInsets(top: s.frame.maxY - s.visibleFrame.maxY, left: 0, bottom: 0, right: 0)
     }
 
     /// Neuer Rahmen (AX) für ein Fenster, das in den Streifen des Docks ragt – oder nil, wenn nichts zu tun ist.
@@ -123,7 +147,7 @@ final class WindowFitter {
         guard AXObserverCreate(pid, fitterCallback, &obs) == .success, let obs else { return }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.3)
-        for n in [kAXWindowResizedNotification, kAXWindowCreatedNotification] {
+        for n in [kAXWindowResizedNotification, kAXWindowCreatedNotification, kAXWindowMovedNotification] {
             AXObserverAddNotification(obs, app, n as CFString, nil)
         }
         CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
@@ -154,16 +178,6 @@ final class WindowFitter {
         return AXValueGetValue(v as! AXValue, .cgPoint, &p) ? p : nil
     }
 
-    private func set(_ el: AXUIElement, size: CGSize) {
-        var s = size
-        if let v = AXValueCreate(.cgSize, &s) { AXUIElementSetAttributeValue(el, kAXSizeAttribute as CFString, v) }
-    }
-
-    private func set(_ el: AXUIElement, origin: CGPoint) {
-        var p = origin
-        if let v = AXValueCreate(.cgPoint, &p) { AXUIElementSetAttributeValue(el, kAXPositionAttribute as CFString, v) }
-    }
-
     private func size(_ el: AXUIElement) -> CGSize? {
         var v: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &v) == .success, let v else { return nil }
@@ -173,9 +187,10 @@ final class WindowFitter {
 }
 
 private let fitterCallback: AXObserverCallback = { _, element, notification, _ in
-    let isNew = (notification as String) == kAXWindowCreatedNotification
+    let name = notification as String
+    let isNew = name == kAXWindowCreatedNotification
     // Neue Fenster bekommen ihre endgültige Größe oft erst kurz nach dem Erzeugen.
     DispatchQueue.main.asyncAfter(deadline: .now() + (isNew ? 0.25 : 0.05)) {
-        WindowFitter.shared.fit(element)
+        if name == kAXWindowMovedNotification { WindowFitter.shared.moved(element) } else { WindowFitter.shared.fit(element) }
     }
 }

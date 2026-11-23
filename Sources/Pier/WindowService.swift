@@ -76,18 +76,28 @@ enum WindowService {
     }
 
     /// Setzt das Fenster so, dass die Mitte seiner Titelleiste am Punkt `p` (Cocoa-Koordinaten) liegt.
-    static func move(_ w: WindowRef, titleBarTo p: NSPoint) {
+    @MainActor static func move(_ w: WindowRef, titleBarTo p: NSPoint) {
         guard let primary = NSScreen.screens.first,
               let sizeValue: AXValue = attr(w.element, kAXSizeAttribute) else { return }
         var size = CGSize.zero
         AXValueGetValue(sizeValue, .cgSize, &size)
         // AX: Ursprung oben links am Hauptbildschirm, y wächst nach unten.
         let screen = NSScreen.screens.first { $0.frame.contains(p) } ?? primary
-        let topLimit = primary.frame.height - screen.visibleFrame.maxY
+        let topLimit = primary.frame.height - WindowFitter.shared.freeArea(on: screen).maxY
         var origin = CGPoint(x: (p.x - size.width / 2).rounded(), y: max(primary.frame.height - p.y - 12, topLimit).rounded())
         if let v = AXValueCreate(.cgPoint, &origin) {
             AXUIElementSetAttributeValue(w.element, kAXPositionAttribute as CFString, v)
         }
+    }
+
+    static func setOrigin(_ el: AXUIElement, _ origin: CGPoint) {
+        var p = origin
+        if let v = AXValueCreate(.cgPoint, &p) { AXUIElementSetAttributeValue(el, kAXPositionAttribute as CFString, v) }
+    }
+
+    static func setSize(_ el: AXUIElement, _ size: CGSize) {
+        var s = size
+        if let v = AXValueCreate(.cgSize, &s) { AXUIElementSetAttributeValue(el, kAXSizeAttribute as CFString, v) }
     }
 
     static func close(_ w: WindowRef) {

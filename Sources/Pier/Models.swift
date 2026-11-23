@@ -343,6 +343,9 @@ struct DockSettings: Codable, Equatable {
         runningOrder = v(.runningOrder, d.runningOrder)
         windowGrouping = v(.windowGrouping, d.windowGrouping)
         barRows = min(max(v(.barRows, d.barRows), 1), DockMetrics.maxBarRows)
+        // Configs von vor der Leiste an allen Kanten: dort konnte die Kante noch aus Pillen-Zeiten auf „links“ stehen,
+        // die Leiste war aber unten. Einmalig unten lassen (barRows wird ab jetzt mitgespeichert).
+        if !c.contains(.barRows), style == .bar { edge = .bottom }
         customColor = v(.customColor, d.customColor)
         showSound = v(.showSound, d.showSound)
         showDevices = v(.showDevices, d.showDevices)

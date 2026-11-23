@@ -60,7 +60,7 @@ final class DockController {
         let gap = settings.style == .pill ? DockMetrics.pillBottomGap : 0
         switch settings.effectiveEdge {
         case .bottom: return visibleTop - sf.minY + gap
-        case .top: return sf.maxY - f.minY + gap
+        case .top: return (screen?.visibleFrame.maxY ?? sf.maxY) - f.minY + gap   // ohne Menüleiste, die zählt der Fitter je Bildschirm
         case .left: return f.maxX - sf.minX + gap
         case .right: return sf.maxX - f.minX + gap
         }
