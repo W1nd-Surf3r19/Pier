@@ -130,6 +130,7 @@ struct ClockWidget: View {
                 }
             }
             .fixedSize()
+            .dockTextShadow()
         }
     }
 }
@@ -145,6 +146,7 @@ struct BatteryWidget: View {
             Text("\(state.level)%")
                 .font(.system(size: 11.5, weight: .medium).monospacedDigit())
                 .foregroundStyle(.secondary)
+                .dockTextShadow()
         }
         .fixedSize()
         .help(state.charging ? "Lädt" : (state.onPower ? "Am Netzteil" : "Batterie"))
@@ -189,6 +191,7 @@ struct NowPlayingWidget: View {
                     }
                 }
                 .lineLimit(1)
+                .dockTextShadow()
                 .frame(maxWidth: compact ? 110 : 160, alignment: .leading)
                 .fixedSize(horizontal: true, vertical: false)
                 .contentShape(Rectangle())

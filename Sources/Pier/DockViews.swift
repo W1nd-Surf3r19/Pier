@@ -257,6 +257,7 @@ struct BarItemView: View {
                         .font(.system(size: 12, weight: t.isActive ? .semibold : .regular))
                         .lineLimit(1)
                         .truncationMode(.tail)
+                        .dockTextShadow()
                 }
             }
             .dropDestination(for: URL.self) { urls, _ in Coordinator.shared.drop(urls, onto: t.app.bundleURL) }
@@ -723,6 +724,20 @@ struct StackMenu: View {
         Divider()
         Button("Aus dem Dock entfernen") { DockStore.shared.removeEntry(stack.id) }
     }
+}
+
+// MARK: Lesbarkeit beim transparenten Thema
+
+/// Ohne Glas liegt Text direkt auf dem Hintergrund – ein leichter Schatten in Gegenfarbe hält ihn lesbar.
+struct DockTextShadow: ViewModifier {
+    @Environment(\.dockTheme) private var theme
+    func body(content: Content) -> some View {
+        content.shadow(color: theme.isClear ? Color(nsColor: .windowBackgroundColor).opacity(0.9) : .clear, radius: 2)
+    }
+}
+
+extension View {
+    func dockTextShadow() -> some View { modifier(DockTextShadow()) }
 }
 
 // MARK: Dock-Kante (für senkrechte Pille)
