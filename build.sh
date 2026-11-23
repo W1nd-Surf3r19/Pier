@@ -17,7 +17,10 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 codesign --force --sign "$IDENTITY" "$APP"
 
 if [ "${1:-}" = "--install" ]; then
-  pkill -x Pier 2>/dev/null && sleep 1 || true
+  pkill -x Pier 2>/dev/null || true
+  # Warten, bis Pier wirklich beendet ist (ein offener Dialog kann das Beenden aufhalten).
+  for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x Pier >/dev/null || break; sleep 0.5; done
+  if pgrep -x Pier >/dev/null; then echo "Pier läuft noch (offener Dialog?) – bitte schließen und erneut versuchen." >&2; exit 1; fi
   rm -rf "$DEST"
   cp -R "$APP" "$DEST"
   echo "Installiert: $DEST"

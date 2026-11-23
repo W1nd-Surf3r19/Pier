@@ -77,6 +77,11 @@ final class DockStore: ObservableObject {
         }
     }
 
+    func addStacks(_ urls: [URL]) {
+        let existing = Set(entries.compactMap { if case .stack(let s) = $0 { s.path } else { nil } })
+        entries.append(contentsOf: urls.map(DockStack.init(url:)).filter { !existing.contains($0.path) }.map(DockEntry.stack))
+    }
+
     func removeEntry(_ id: UUID) {
         entries.removeAll { $0.id == id }
     }
@@ -129,6 +134,24 @@ final class DockStore: ObservableObject {
             newEntries.append(.app(app))
         }
         entries = newEntries
+    }
+
+    /// Vorherige Anordnung für „Rückgängig“ (nur bis Pier beendet wird).
+    @Published private(set) var undoEntries: [DockEntry]?
+
+    func applyArrangement(_ new: [DockEntry]) {
+        undoEntries = entries
+        entries = new
+    }
+
+    func undoArrangement() {
+        guard let undoEntries else { return }
+        entries = undoEntries
+        self.undoEntries = nil
+    }
+
+    func addSeparator() {
+        entries.append(.separator(DockSeparator()))
     }
 
     func resetFromSystemDock() {

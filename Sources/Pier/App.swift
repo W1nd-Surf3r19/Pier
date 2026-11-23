@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        UsageTracker.shared.closeSession(reopen: false)
         DockStore.shared.save()
         SystemDock.restore()
     }

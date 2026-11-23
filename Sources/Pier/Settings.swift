@@ -8,7 +8,9 @@ final class SettingsWindowController {
     static let shared = SettingsWindowController()
     private var window: NSWindow?
 
-    func show() {
+    func show(tab: SettingsNav.Tab? = nil, arrange: Bool = false) {
+        if let tab { SettingsNav.shared.tab = tab }
+        if arrange { SettingsNav.shared.showArrange = true }
         if window == nil {
             let w = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
             w.title = "Pier"
@@ -22,13 +24,23 @@ final class SettingsWindowController {
     }
 }
 
+@MainActor
+final class SettingsNav: ObservableObject {
+    static let shared = SettingsNav()
+    enum Tab: Hashable { case appearance, apps, widgets, general }
+    @Published var tab: Tab = .appearance
+    @Published var showArrange = false
+}
+
 struct SettingsView: View {
+    @ObservedObject var nav = SettingsNav.shared
+
     var body: some View {
-        TabView {
-            AppearanceTab().tabItem { Label("Darstellung", systemImage: "paintbrush") }
-            AppsTab().tabItem { Label("Apps", systemImage: "square.grid.2x2") }
-            WidgetsTab().tabItem { Label("Widgets", systemImage: "clock") }
-            GeneralTab().tabItem { Label("Allgemein", systemImage: "gearshape") }
+        TabView(selection: $nav.tab) {
+            AppearanceTab().tabItem { Label("Darstellung", systemImage: "paintbrush") }.tag(SettingsNav.Tab.appearance)
+            AppsTab().tabItem { Label("Apps", systemImage: "square.grid.2x2") }.tag(SettingsNav.Tab.apps)
+            WidgetsTab().tabItem { Label("Widgets", systemImage: "clock") }.tag(SettingsNav.Tab.widgets)
+            GeneralTab().tabItem { Label("Allgemein", systemImage: "gearshape") }.tag(SettingsNav.Tab.general)
         }
         .frame(width: 580, height: 540)
     }
@@ -63,7 +75,18 @@ struct AppearanceTab: View {
                     ForEach(AppearanceMode.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                Picker("Position", selection: $store.settings.edge) {
+                    ForEach(DockEdge.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .disabled(store.settings.style == .bar)
                 Toggle("Dock automatisch ausblenden", isOn: $store.settings.autoHide)
+                Toggle("Dock auf allen Bildschirmen", isOn: $store.settings.allScreens)
+            } footer: {
+                if store.settings.style == .bar {
+                    Text("Die schlanke Leiste sitzt immer unten – seitlich gibt es nur die Pille.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
 
             Section {
@@ -71,13 +94,19 @@ struct AppearanceTab: View {
                 Toggle("Laufende, nicht angepinnte Apps anzeigen", isOn: $store.settings.showRunningApps)
                 Toggle("Fenster-Vorschau beim Darüberfahren", isOn: $store.settings.windowPreviews)
                 Toggle("Klick auf aktive App blendet sie aus", isOn: $store.settings.clickHidesActiveApp)
+                Toggle("Scrollen über einem Icon wechselt die Fenster", isOn: $store.settings.scrollCyclesWindows)
+                Toggle("⌃ halten zeigt CPU und Speicher je App", isOn: $store.settings.showActivity)
+                Toggle("Nur Fenster des aktuellen Schreibtischs zeigen", isOn: $store.settings.currentSpaceOnly)
+                Toggle("Scrollen auf einer Titelleiste ordnet das Fenster an", isOn: $store.settings.titlebarScroll)
+                    .help("Hoch: maximieren · Runter: zentrieren · Links/Rechts: Bildschirmhälfte")
             } header: { Text("Verhalten") }
 
-            if store.settings.style == .bar {
-                Section {
-                    Text("Hinweis: macOS lässt Drittanbieter keinen Platz am Bildschirmrand reservieren. Maximierte Fenster reichen deshalb unter die Leiste. Wenn dich das stört, schalte „automatisch ausblenden“ ein.")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
+            Section {
+                Toggle("Fenster automatisch über dem Dock halten", isOn: $store.settings.fitWindows)
+                    .disabled(store.settings.autoHide || store.settings.effectiveEdge != .bottom)
+            } footer: {
+                Text("Wird ein Fenster so groß gezogen oder gezoomt, dass es unter das Dock reicht, kürzt Pier es bis zur Oberkante. Bei „automatisch ausblenden“ nicht nötig, und nur für das Dock unten.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
@@ -139,31 +168,63 @@ struct StyleChoice: View {
 
 struct AppsTab: View {
     @ObservedObject var store = DockStore.shared
+    @ObservedObject var nav = SettingsNav.shared
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Button { nav.showArrange = true } label: {
+                    Label("Intelligent anordnen…", systemImage: "wand.and.stars")
+                }
+                .controlSize(.large)
+                if store.undoEntries != nil {
+                    Button("Rückgängig") { store.undoArrangement() }
+                }
+                Spacer()
+            }
+            .padding(12)
             List {
                 ForEach(store.entries) { entry in
                     switch entry {
                     case .app(let app): AppRow(app: app, folderID: nil)
                     case .folder(let f): FolderRow(folder: f)
+                    case .stack(let s): StackRow(stack: s)
+                    case .separator(let s): SeparatorRow(separator: s)
                     }
                 }
                 .onMove { store.moveEntries(from: $0, to: $1) }
             }
             .listStyle(.inset)
+            .sheet(isPresented: $nav.showArrange) { ArrangeSheet() }
 
             Divider()
             HStack {
                 Button { store.addApps(pickApps()) } label: { Label("App hinzufügen…", systemImage: "plus") }
                 Button { store.addFolder() } label: { Label("Ordner erstellen", systemImage: "folder.badge.plus") }
+                Button { store.addStacks(pickFolders()) } label: { Label("Stapel…", systemImage: "tray.full") }
+                    .help("Einen Finder-Ordner (z. B. Downloads) als Stapel ins Dock legen")
                 Spacer()
                 Menu("Mehr") {
+                    Button("Trennlinie hinzufügen") { store.addSeparator() }
                     Button("Apps vom Mac-Dock übernehmen") { store.resetFromSystemDock() }
                 }
                 .fixedSize()
             }
             .padding(12)
+            if !store.settings.excludedApps.isEmpty {
+                Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Nicht angezeigte Apps").font(.callout.weight(.medium))
+                    ForEach(store.settings.excludedApps.sorted { $0.value < $1.value }, id: \.key) { key, name in
+                        HStack {
+                            Text(name)
+                            Spacer()
+                            Button("Wieder anzeigen") { store.settings.excludedApps[key] = nil }
+                        }
+                    }
+                }
+                .padding(.horizontal, 12).padding(.top, 10)
+            }
             Text("Reihenfolge per Ziehen ändern. Das Ordner-Symbol neben einer App verschiebt sie in einen Ordner.")
                 .font(.caption).foregroundStyle(.secondary)
                 .padding(.horizontal, 12).padding(.bottom, 10)
@@ -180,6 +241,39 @@ func pickApps() -> [URL] {
     p.directoryURL = URL(fileURLWithPath: "/Applications")
     p.prompt = "Hinzufügen"
     return p.runModal() == .OK ? p.urls : []
+}
+
+@MainActor
+func pickFolders() -> [URL] {
+    let p = NSOpenPanel()
+    p.allowsMultipleSelection = true
+    p.canChooseDirectories = true
+    p.canChooseFiles = false
+    p.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+    p.prompt = "Als Stapel hinzufügen"
+    return p.runModal() == .OK ? p.urls : []
+}
+
+struct StackRow: View {
+    let stack: DockStack
+    @ObservedObject var store = DockStore.shared
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(nsImage: IconCache.icon(forPath: stack.path)).resizable().frame(width: 24, height: 24)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(stack.name)
+                Text(stack.path).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+            }
+            Spacer()
+            Button { store.removeEntry(stack.id) } label: {
+                Image(systemName: "minus.circle.fill").foregroundStyle(.red.opacity(0.85))
+            }
+            .buttonStyle(.plain)
+            .help("Stapel entfernen")
+        }
+        .padding(.vertical, 2)
+    }
 }
 
 struct AppRow: View {
@@ -262,8 +356,9 @@ struct WidgetsTab: View {
                 Toggle("Datum unter der Uhrzeit", isOn: $store.settings.showDate).disabled(!store.settings.showClock)
                 Toggle("Akku", isOn: $store.settings.showBattery)
                 Toggle("Aktuelle Musik (Apple Music, Spotify)", isOn: $store.settings.showNowPlaying)
+                Toggle("Badges, Fortschritt und Hinweise an App-Icons", isOn: $store.settings.showBadges)
             } header: { Text("Im Dock anzeigen") } footer: {
-                Text("Die Musik-Anzeige erscheint, sobald Music oder Spotify einen Titel startet oder pausiert.")
+                Text("Die Musik-Anzeige erscheint, sobald Music oder Spotify einen Titel startet oder pausiert. Badges übernimmt Pier vom ausgeblendeten Mac-Dock (braucht Bedienungshilfen).")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -283,6 +378,9 @@ struct GeneralTab: View {
             Section {
                 Toggle("Mac-Dock ausblenden", isOn: $store.settings.hideSystemDock)
                 Toggle("Launcher mit ⌥ Leertaste öffnen", isOn: $store.settings.launcherHotKey)
+                Toggle("Angepinnte Apps mit ⌃⌥1 … 9 öffnen", isOn: $store.settings.appHotKeys)
+                Toggle("Fenster mit ⌥Tab wechseln", isOn: $store.settings.altTab)
+                    .help("⌥ halten, Tab drücken (⇧ rückwärts), ⌥ loslassen wechselt. ⌥Esc bricht ab.")
                 Toggle("Beim Anmelden starten", isOn: $loginItem)
                     .onChange(of: loginItem) { _, on in
                         do {
@@ -329,6 +427,219 @@ struct PermissionRow: View {
             }
             Spacer()
             if !granted { Button("Erlauben…", action: request) }
+        }
+    }
+}
+
+struct SeparatorRow: View {
+    let separator: DockSeparator
+    @ObservedObject var store = DockStore.shared
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Rectangle().fill(Color.secondary.opacity(0.4)).frame(width: 24, height: 1.5)
+            Text("Trennlinie").foregroundStyle(.secondary)
+            Spacer()
+            Button { store.removeEntry(separator.id) } label: {
+                Image(systemName: "minus.circle.fill").foregroundStyle(.red.opacity(0.85))
+            }
+            .buttonStyle(.plain)
+            .help("Trennlinie entfernen")
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+// MARK: Intelligent anordnen
+
+struct ArrangeSheet: View {
+    @ObservedObject var store = DockStore.shared
+    @ObservedObject var usage = UsageTracker.shared
+    @Environment(\.dismiss) private var dismiss
+    @State private var options = SmartArranger.Options()
+    @State private var pinSuggestions = true
+    @State private var declined: Set<String> = []
+    @State private var suggestions: [PinnedApp] = []
+    /// Gruppenreihenfolge, die du hier festlegst; leer = automatisch nach Nutzung.
+    @State private var order: [AppCategory] = []
+    @State private var orderChanged = false
+
+    private var days: Int { usage.book.trackedDays(now: Date()) }
+    private var canFindRare: Bool { days >= 14 }
+
+    var body: some View {
+        let plan = makePlan()
+        // „neu“ nur für Apps, die noch nirgends im Dock liegen (auch nicht in einem Ordner).
+        let existing = Set(store.entries.flatMap { e -> [String] in
+            switch e {
+            case .app(let a): [a.key]
+            case .folder(let f): f.apps.map(\.key)
+            default: []
+            }
+        })
+        let newKeys = Set(suggestions.map(\.key)).subtracting(existing).subtracting(declined)
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Intelligent anordnen").font(.title2.weight(.semibold))
+                Text(learningNote).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Toggle("Apps, die du gerade oder oft benutzt, anheften", isOn: $pinSuggestions)
+                Toggle("Trennlinien zwischen den Gruppen", isOn: $options.separators)
+                Toggle("Selten benutzte Apps in den Ordner „\(SmartArranger.rareFolderName)“", isOn: $options.rareIntoFolder)
+                    .disabled(!canFindRare)
+                    .help(canFindRare ? "" : "Pier braucht dafür mindestens 14 Tage Nutzungsdaten.")
+            }
+
+            HStack {
+                Text("Gruppen ziehen oder mit den Pfeilen verschieben – oben in der Liste steht ganz links im Dock.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if !order.isEmpty {
+                    Button("Automatisch") {
+                        order = []
+                        orderChanged = true
+                    }
+                    .buttonStyle(.link).font(.caption)
+                    .help("Gruppenreihenfolge wieder nach Nutzung bestimmen")
+                }
+            }
+
+            List {
+                ForEach(Array(plan.groups.enumerated()), id: \.element.id) { i, g in
+                    PlanRow(title: g.category.title, symbol: g.category.symbol, apps: g.apps, newKeys: newKeys,
+                            declined: $declined,
+                            move: (up: i > 0 ? { moveGroup(from: i, to: i - 1, in: plan) } : nil,
+                                   down: i < plan.groups.count - 1 ? { moveGroup(from: i, to: i + 2, in: plan) } : nil))
+                }
+                .onMove { from, to in
+                    guard let i = from.first else { return }
+                    moveGroup(from: i, to: to, in: plan)
+                }
+                if !plan.rare.isEmpty {
+                    PlanRow(title: SmartArranger.rareFolderName, symbol: "folder", apps: plan.rare, newKeys: [],
+                            declined: $declined, move: nil)
+                }
+            }
+            .listStyle(.inset)
+            .frame(maxHeight: .infinity)
+
+            HStack {
+                if pinSuggestions && !newKeys.isEmpty {
+                    Text("„neu“ = wird angeheftet. Antippen, um eine App auszulassen.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Abbrechen") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Übernehmen") {
+                    if orderChanged { store.settings.groupOrder = order.map(\.rawValue) }
+                    store.applyArrangement(plan.entries)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 540, height: 520)
+        .onAppear {
+            suggestions = Self.suggestions(usage: usage)
+            order = store.settings.groupOrder.compactMap(AppCategory.init(rawValue:))
+        }
+    }
+
+    /// Verschiebt eine Gruppe; ab dann gilt die angezeigte Reihenfolge als festgelegt.
+    private func moveGroup(from: Int, to: Int, in plan: SmartArranger.Plan) {
+        var cats = plan.groups.map(\.category)
+        cats.move(fromOffsets: IndexSet(integer: from), toOffset: to)
+        // Gruppen, die gerade nicht vorkommen, behalten ihren Platz in der gespeicherten Reihenfolge (hinten).
+        order = cats + order.filter { !cats.contains($0) }
+        orderChanged = true
+    }
+
+    private var learningNote: String {
+        let base = "Pier sortiert deine Apps in Gruppen – die meistbenutzte Gruppe und darin die meistbenutzte App zuerst."
+        switch days {
+        case 0: return base + " Pier hat gerade erst angefangen mitzulernen, wie lange du welche App nutzt – die Reihenfolge wird mit jedem Tag besser."
+        case 1: return base + " Pier lernt seit einem Tag mit."
+        default: return base + " Pier lernt seit \(days) Tagen mit."
+        }
+    }
+
+    private func makePlan() -> SmartArranger.Plan {
+        let now = Date()
+        let book = usage.book
+        let add = pinSuggestions ? suggestions.filter { !declined.contains($0.key) } : []
+        var options = options
+        options.order = order
+        return SmartArranger.plan(entries: store.entries, add: add, options: options,
+                                  score: { book.score($0, now: now) },
+                                  isRare: { key in key != SmartArranger.finderID && book.score(key, now: now) < 2 },
+                                  category: SmartArranger.category(of:))
+    }
+
+    /// Laufende Apps plus oft benutzte (auch gerade geschlossene), meistbenutzte zuerst, höchstens 12.
+    static func suggestions(usage: UsageTracker) -> [PinnedApp] {
+        let now = Date()
+        let running = RunningAppsModel.shared.otherApps.compactMap { $0.bundleURL }
+        let frequent = usage.book.apps.filter { usage.book.score($0.key, now: now) >= 30 }
+            .map { URL(fileURLWithPath: $0.value.path) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        var seen = Set<String>()
+        let apps = (running + frequent).map(PinnedApp.init(url:)).filter { seen.insert($0.key).inserted }
+        return Array(apps.sorted { usage.book.score($0.key, now: now) > usage.book.score($1.key, now: now) }.prefix(12))
+    }
+}
+
+struct PlanRow: View {
+    let title: String
+    let symbol: String
+    let apps: [PinnedApp]
+    let newKeys: Set<String>
+    @Binding var declined: Set<String>
+    /// Pfeile zum Verschieben (nil = Gruppe ist nicht verschiebbar bzw. steht schon am Rand).
+    let move: (up: (() -> Void)?, down: (() -> Void)?)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                if move != nil {
+                    Image(systemName: "line.3.horizontal").font(.caption).foregroundStyle(.tertiary)
+                }
+                Label(title, systemImage: symbol).font(.callout.weight(.semibold)).foregroundStyle(.secondary)
+                Spacer()
+                if let move {
+                    Button { move.up?() } label: { Image(systemName: "chevron.up") }
+                        .disabled(move.up == nil)
+                        .help("Gruppe nach links (in der Liste nach oben)")
+                        .accessibilityLabel("\(title) nach links")
+                    Button { move.down?() } label: { Image(systemName: "chevron.down") }
+                        .disabled(move.down == nil)
+                        .help("Gruppe nach rechts (in der Liste nach unten)")
+                        .accessibilityLabel("\(title) nach rechts")
+                }
+            }
+            .buttonStyle(.borderless)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 74), spacing: 6)], alignment: .leading, spacing: 6) {
+                ForEach(apps) { app in
+                    let isNew = newKeys.contains(app.key)
+                    VStack(spacing: 4) {
+                        Image(nsImage: IconCache.icon(forPath: app.path)).resizable().interpolation(.high).frame(width: 40, height: 40)
+                        Text(app.name).font(.system(size: 11)).lineLimit(1).truncationMode(.middle)
+                    }
+                    .frame(width: 74)
+                    .overlay(alignment: .topTrailing) {
+                        if isNew {
+                            Text("neu").font(.system(size: 9, weight: .bold)).foregroundStyle(.white)
+                                .padding(.horizontal, 5).padding(.vertical, 1.5)
+                                .background(Capsule().fill(Color.accentColor))
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { if isNew { declined.insert(app.key) } }
+                    .help(isNew ? "Antippen: nicht anheften" : "")
+                }
+            }
         }
     }
 }

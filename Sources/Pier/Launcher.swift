@@ -96,7 +96,8 @@ final class LauncherController: NSObject, NSWindowDelegate {
     func toggle() { isVisible ? hide() : show() }
 
     func show() {
-        guard let sf = PanelFactory.mainScreen?.visibleFrame else { return }
+        let screen = NSScreen.screens.first { $0.frame.contains(NSEvent.mouseLocation) } ?? PanelFactory.mainScreen
+        guard let sf = screen?.visibleFrame else { return }
         model.query = ""
         model.selection = 0
         model.scrollTarget = nil

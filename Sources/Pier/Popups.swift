@@ -10,6 +10,7 @@ enum HoverTarget: Equatable {
 enum PopupContent: Equatable {
     case preview(HoverTarget)
     case folder(DockFolder)
+    case stack(DockStack)
 }
 
 /// Kleines schwebendes Fenster über dem Dock: Name, Fenster-Vorschau oder Ordner-Inhalt.
@@ -22,6 +23,8 @@ final class PopupController {
     private var showTimer: Timer?
     private var hideTimer: Timer?
     private var popupHovered = false
+    /// Während ein Fenster aus der Vorschau gezogen wird, darf das Popup nicht verschwinden.
+    var draggingWindow = false
     private var monitors: [Any] = []
 
     var isVisible: Bool { panel.isVisible }
@@ -38,7 +41,7 @@ final class PopupController {
     // MARK: Hover
 
     func hoverBegan(_ target: HoverTarget, anchor: CGRect) {
-        if case .folder = content, panel.isVisible { return }
+        if isPinnedOpen, panel.isVisible { return }
         hideTimer?.invalidate()
         showTimer?.invalidate()
         self.anchor = anchor
@@ -53,7 +56,7 @@ final class PopupController {
 
     func hoverEnded() {
         showTimer?.invalidate()
-        if case .folder = content { return }
+        if isPinnedOpen { return }
         scheduleHide()
     }
 
@@ -70,23 +73,34 @@ final class PopupController {
         hideTimer?.invalidate()
         hideTimer = Timer.scheduledTimer(withTimeInterval: 0.22, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
-                guard let self, !self.popupHovered else { return }
+                guard let self, !self.popupHovered, !self.draggingWindow else { return }
                 self.hide()
             }
         }
     }
 
-    // MARK: Ordner
+    // MARK: Ordner & Stapel
 
-    func toggleFolder(_ folder: DockFolder, anchor: CGRect) {
-        if case .folder(let f) = content, f.id == folder.id, panel.isVisible {
+    /// Ordner und Stapel bleiben per Klick offen, bis man daneben klickt.
+    private var isPinnedOpen: Bool {
+        switch content {
+        case .folder?, .stack?: true
+        default: false
+        }
+    }
+
+    func toggleFolder(_ folder: DockFolder, anchor: CGRect) { toggle(.folder(folder), anchor: anchor) }
+    func toggleStack(_ stack: DockStack, anchor: CGRect) { toggle(.stack(stack), anchor: anchor) }
+
+    private func toggle(_ c: PopupContent, anchor: CGRect) {
+        if content == c, panel.isVisible {
             hide()
             return
         }
         showTimer?.invalidate()
         hideTimer?.invalidate()
         self.anchor = anchor
-        present(.folder(folder))
+        present(c)
         installOutsideClickMonitors()
     }
 
@@ -98,7 +112,7 @@ final class PopupController {
         if let l = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] e in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                if e.window !== self.panel && e.window !== Coordinator.shared.dock.panel { self.hide() }
+                if e.window !== self.panel && !Coordinator.shared.isDockPanel(e.window) { self.hide() }
             }
             return e
         }) { monitors.append(l) }
@@ -133,11 +147,8 @@ final class PopupController {
     }
 
     private func resize(to size: CGSize) {
-        guard size.width > 1, size.height > 1, let screen = PanelFactory.mainScreen else { return }
-        let dockTop = Coordinator.shared.dock.panel.frame.maxY
-        var x = anchor.midX - size.width / 2
-        x = min(max(x, screen.frame.minX + 8), screen.frame.maxX - size.width - 8)
-        panel.setFrame(NSRect(x: x.rounded(), y: (dockTop + 8).rounded(), width: size.width, height: size.height), display: true)
+        guard size.width > 1, size.height > 1 else { return }
+        panel.setFrame(Coordinator.shared.dock(containing: anchor).popupFrame(size: size, anchor: anchor), display: true)
         panel.invalidateShadow()
     }
 
@@ -148,6 +159,8 @@ final class PopupController {
         content = nil
         popupHovered = false
         panel.orderOut(nil)
+        // Inhalt verwerfen, damit ein erneut geöffneter Stapel frisch einliest.
+        hosting.rootView = PopupRootView(content: nil, onSize: { _ in })
     }
 }
 
@@ -162,6 +175,7 @@ struct PopupRootView: View {
             switch content {
             case .preview(let t)?: PreviewView(target: t)
             case .folder(let f)?: FolderGridView(folder: f)
+            case .stack(let s)?: StackView(stack: s)
             case nil: EmptyView()
             }
         }
@@ -228,6 +242,7 @@ struct WindowCard: View {
     @State private var image: NSImage?
     @State private var loaded = false
     @State private var hovering = false
+    @State private var dragging = false
 
     private var title: String {
         window.title.isEmpty ? (NSRunningApplication(processIdentifier: window.pid)?.localizedName ?? "Fenster") : window.title
@@ -238,7 +253,23 @@ struct WindowCard: View {
             if thumbnails { card } else { row }
         }
         .contentShape(Rectangle())
+        .opacity(dragging ? 0.55 : 1)
         .onTapGesture { Coordinator.shared.focusWindow(window) }
+        .gesture(DragGesture(minimumDistance: 6)
+            .onChanged { _ in
+                dragging = true
+                Coordinator.shared.popup.draggingWindow = true
+            }
+            .onEnded { _ in
+                dragging = false
+                Coordinator.shared.popup.draggingWindow = false
+                let p = NSEvent.mouseLocation
+                // Nur außerhalb von Popup und Dock loslassen zählt als „hierhin verschieben“.
+                guard !Coordinator.shared.popup.panel.frame.contains(p),
+                      !Coordinator.shared.docks.contains(where: { $0.panel.frame.contains(p) }) else { return }
+                WindowService.move(window, titleBarTo: p)
+                Coordinator.shared.focusWindow(window)
+            })
         .onHoverAlways { h, _ in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
     }
 
@@ -269,7 +300,15 @@ struct WindowCard: View {
                 }
             }
             .overlay(alignment: .topLeading) {
-                if hovering { closeButton.padding(6) }
+                if hovering {
+                    HStack(spacing: 4) {
+                        windowButton("xmark", help: "Fenster schließen") { WindowService.close(window) }
+                        if !window.isMinimized {
+                            windowButton("minus", help: "Fenster minimieren") { WindowService.minimize(window) }
+                        }
+                    }
+                    .padding(6)
+                }
             }
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -299,15 +338,16 @@ struct WindowCard: View {
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.primary.opacity(hovering ? 0.10 : 0)))
     }
 
-    private var closeButton: some View {
-        Button { WindowService.close(window) } label: {
-            Image(systemName: "xmark")
+    private func windowButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
                 .font(.system(size: 8, weight: .bold))
                 .frame(width: 18, height: 18)
                 .background(Circle().fill(.regularMaterial))
         }
         .buttonStyle(.plain)
-        .help("Fenster schließen")
+        .help(help)
+        .accessibilityLabel(help)
     }
 }
 
@@ -361,5 +401,96 @@ struct FolderAppCell: View {
         }
         .buttonStyle(DockPressStyle())
         .onHoverAlways { h, _ in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
+    }
+}
+
+// MARK: Stapel (echter Finder-Ordner)
+
+struct StackView: View {
+    let stack: DockStack
+    @State private var files: [URL] = []
+    @State private var loaded = false
+    private let columns = 4
+    private static let limit = 24
+
+    var body: some View {
+        let rows = stride(from: 0, to: files.count, by: columns).map { Array(files[$0..<min($0 + columns, files.count)]) }
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(stack.name).font(.system(size: 13, weight: .semibold))
+                Spacer(minLength: 20)
+                Button("Im Finder öffnen") {
+                    Coordinator.shared.popup.hide()
+                    NSWorkspace.shared.open(stack.url)
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 12))
+            }
+            .padding(.horizontal, 6)
+            if loaded && files.isEmpty {
+                Text("Der Ordner ist leer oder Pier darf ihn nicht lesen.")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.bottom, 4)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(rows.indices, id: \.self) { r in
+                    HStack(spacing: 4) {
+                        ForEach(rows[r], id: \.self) { StackFileCell(url: $0) }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .frame(minWidth: 260, alignment: .leading)
+        .task(id: stack.path) {
+            files = Self.recentFiles(in: stack.url)
+            loaded = true
+        }
+    }
+
+    /// Neueste zuerst (nach „Hinzugefügt am“, sonst Änderungsdatum), wie der Stapel im Mac-Dock.
+    static func recentFiles(in dir: URL) -> [URL] {
+        let keys: [URLResourceKey] = [.addedToDirectoryDateKey, .contentModificationDateKey]
+        let urls = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: keys,
+                                                                   options: [.skipsHiddenFiles])) ?? []
+        func date(_ u: URL) -> Date {
+            let v = try? u.resourceValues(forKeys: Set(keys))
+            return v?.addedToDirectoryDate ?? v?.contentModificationDate ?? .distantPast
+        }
+        return Array(urls.map { ($0, date($0)) }.sorted { $0.1 > $1.1 }.prefix(limit).map(\.0))
+    }
+}
+
+struct StackFileCell: View {
+    let url: URL
+    @State private var hovering = false
+
+    var body: some View {
+        Button {
+            Coordinator.shared.popup.hide()
+            NSWorkspace.shared.open(url)
+        } label: {
+            VStack(spacing: 5) {
+                Image(nsImage: IconCache.icon(forPath: url.path))
+                    .resizable().interpolation(.high).frame(width: 48, height: 48)
+                    .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                Text(url.lastPathComponent)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .truncationMode(.middle)
+            }
+            .frame(width: 84, height: 92)
+            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(hovering ? 0.09 : 0)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(DockPressStyle())
+        .onHoverAlways { h, _ in withAnimation(.easeOut(duration: 0.12)) { hovering = h } }
+        .onDrag { NSItemProvider(contentsOf: url) ?? NSItemProvider() }
+        .contextMenu {
+            Button("Öffnen") { NSWorkspace.shared.open(url) }
+            Button("Im Finder zeigen") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+        }
+        .help(url.lastPathComponent)
     }
 }

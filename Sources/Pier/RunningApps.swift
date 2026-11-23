@@ -22,18 +22,24 @@ final class RunningAppsModel: ObservableObject {
     @Published private(set) var apps: [NSRunningApplication] = []
     @Published private(set) var frontmostPID: pid_t = 0
     @Published private(set) var windows: [pid_t: [WindowRef]] = [:]
+    @Published private(set) var onScreen: Set<CGWindowID> = []
     @Published private(set) var launching: Set<String> = []
+    @Published private(set) var badges: [String: String] = [:]
+    @Published private(set) var progress: [String: Double] = [:]
+    /// Apps, deren Badge gerade neu erschienen oder gestiegen ist – das Icon leuchtet kurz auf.
+    @Published private(set) var attention: Set<String> = []
     @Published private(set) var axTrusted = AXIsProcessTrusted()
     @Published private(set) var screenRecording = CGPreflightScreenCaptureAccess()
 
     private var timer: Timer?
+    private var statusLoaded = false
     private var refreshing = false
 
     private init() {
         let nc = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification,
                      NSWorkspace.didActivateApplicationNotification, NSWorkspace.didHideApplicationNotification,
-                     NSWorkspace.didUnhideApplicationNotification] {
+                     NSWorkspace.didUnhideApplicationNotification, NSWorkspace.activeSpaceDidChangeNotification] {
             nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
                 MainActor.assumeIsolated {
                     if name == NSWorkspace.didLaunchApplicationNotification,
@@ -68,14 +74,45 @@ final class RunningAppsModel: ObservableObject {
         let pids = apps.map(\.processIdentifier)
         Task.detached(priority: .userInitiated) {
             let result = WindowService.windows(for: pids)
+            let status = WindowService.dockStatus()
+            let onScreen = WindowService.onScreenWindowIDs()
             await MainActor.run {
                 if result != self.windows { self.windows = result }
+                if onScreen != self.onScreen { self.onScreen = onScreen }
+                if status.badges != self.badges {
+                    if self.statusLoaded { self.flashNewBadges(old: self.badges, new: status.badges) }
+                    self.badges = status.badges
+                }
+                if status.progress != self.progress { self.progress = status.progress }
+                self.statusLoaded = true
                 self.refreshing = false
             }
         }
     }
 
+    private func flashNewBadges(old: [String: String], new: [String: String]) {
+        for (key, label) in new where Self.badgeRose(from: old[key], to: label) {
+            attention.insert(key)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) { [weak self] in self?.attention.remove(key) }
+        }
+    }
+
+    /// Neu erschienen oder Zahl gestiegen. Text-Badges (z. B. „•“) zählen nur beim Erscheinen.
+    nonisolated static func badgeRose(from old: String?, to new: String) -> Bool {
+        guard let old else { return true }
+        if let o = Int(old), let n = Int(new) { return n > o }
+        return false
+    }
+
     // MARK: Abfragen
+
+    /// Fenster einer App, wie Pier sie zeigt: auf Wunsch nur die des aktuellen Schreibtischs.
+    /// Minimierte Fenster und Fenster ausgeblendeter Apps liegen nie auf dem Bildschirm – sie bleiben drin.
+    func shownWindows(of app: NSRunningApplication) -> [WindowRef] {
+        let all = windows[app.processIdentifier] ?? []
+        guard DockStore.shared.settings.currentSpaceOnly, !app.isHidden else { return all }
+        return all.filter { $0.isMinimized || $0.windowID == 0 || onScreen.contains($0.windowID) }
+    }
 
     func app(forKey key: String) -> NSRunningApplication? {
         apps.first { AppName.key($0) == key || $0.bundleURL?.standardizedFileURL.path == key }
@@ -89,7 +126,7 @@ final class RunningAppsModel: ObservableObject {
 
     func windows(forKey key: String) -> [WindowRef] {
         guard let app = app(forKey: key) else { return [] }
-        return windows[app.processIdentifier] ?? []
+        return shownWindows(of: app)
     }
 
     func hasVisibleWindows(_ app: NSRunningApplication) -> Bool {
@@ -104,30 +141,28 @@ final class RunningAppsModel: ObservableObject {
 
     /// Laufende Apps, die nicht direkt im Dock angepinnt sind.
     func unpinnedApps(pinned: Set<String>) -> [NSRunningApplication] {
-        apps.filter { !pinned.contains(AppName.key($0)) && $0.bundleURL?.lastPathComponent != "Pier.app" }
+        otherApps.filter { !pinned.contains(AppName.key($0)) }
     }
 
-    /// Einträge der Fensterleiste (Leisten-Stil): ein Eintrag pro Fenster.
-    func taskItems(pinned: Set<String>) -> [TaskItem] {
-        var items: [TaskItem] = []
-        for app in apps where app.bundleURL?.lastPathComponent != "Pier.app" {
-            let key = AppName.key(app)
-            let name = app.localizedName ?? "App"
-            let isFront = app.processIdentifier == frontmostPID && !app.isHidden
-            let wins = windows[app.processIdentifier] ?? []
-            if wins.isEmpty {
-                if !axTrusted || !pinned.contains(key) {
-                    items.append(TaskItem(id: "a-\(key)", app: app, window: nil, title: name, isActive: isFront))
-                }
-            } else {
-                for w in wins {
-                    items.append(TaskItem(id: w.id, app: app, window: w,
-                                          title: w.title.isEmpty ? name : w.title,
-                                          isActive: isFront && w.isFocused))
-                }
-            }
+    /// Tabs einer App für die Leiste: ein Tab pro Fenster, ohne Fenster ein App-Tab.
+    func tasks(for app: NSRunningApplication) -> [TaskItem] {
+        let key = AppName.key(app)
+        let name = app.localizedName ?? "App"
+        let isFront = app.processIdentifier == frontmostPID && !app.isHidden
+        let wins = shownWindows(of: app)
+        if wins.isEmpty {
+            return [TaskItem(id: "a-\(key)", app: app, window: nil, title: name, isActive: isFront)]
         }
-        return items
+        return wins.map { w in
+            TaskItem(id: w.id, app: app, window: w, title: w.title.isEmpty ? name : w.title,
+                     isActive: isFront && w.isFocused)
+        }
+    }
+
+    /// Alle laufenden Apps außer Pier selbst und den ausgeschlossenen.
+    var otherApps: [NSRunningApplication] {
+        let excluded = DockStore.shared.settings.excludedApps
+        return apps.filter { $0.bundleURL?.lastPathComponent != "Pier.app" && excluded[AppName.key($0)] == nil }
     }
 }
 

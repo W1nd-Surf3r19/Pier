@@ -14,7 +14,8 @@ let package = Package(
                 .linkedFramework("ServiceManagement"),
                 .linkedFramework("Carbon"),
             ]
-        )
+        ),
+        .testTarget(name: "PierTests", dependencies: ["Pier"], path: "Tests/PierTests"),
     ],
     swiftLanguageModes: [.v5]
 )

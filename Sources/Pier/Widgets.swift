@@ -210,6 +210,7 @@ struct NowPlayingWidget: View {
 struct WidgetStrip: View {
     let settings: DockSettings
     var compact: Bool
+    var vertical = false
     @ObservedObject var model = WidgetModel.shared
 
     var hasContent: Bool {
@@ -218,7 +219,8 @@ struct WidgetStrip: View {
     }
 
     var body: some View {
-        HStack(spacing: compact ? 12 : 18) {
+        let layout = vertical ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: compact ? 12 : 18))
+        layout {
             if settings.showNowPlaying { NowPlayingWidget(compact: compact) }
             if settings.showBattery, let b = model.battery { BatteryWidget(state: b) }
             if settings.showClock { ClockWidget(showDate: settings.showDate) }

@@ -137,17 +137,26 @@ final class HotKey {
     private var ref: EventHotKeyRef?
     private var handler: EventHandlerRef?
     private let action: () -> Void
+    private let id: UInt32
+    nonisolated(unsafe) private static var nextID: UInt32 = 1
 
     init(keyCode: UInt32 = UInt32(kVK_Space), modifiers: UInt32 = UInt32(optionKey), action: @escaping () -> Void) {
         self.action = action
+        id = HotKey.nextID
+        HotKey.nextID += 1
         var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, _, ctx in
-            guard let ctx else { return noErr }
+        // Jede Instanz hat einen eigenen Handler – nur auf die eigene ID reagieren, sonst feuern alle Kürzel gemeinsam.
+        InstallEventHandler(GetApplicationEventTarget(), { _, event, ctx in
+            guard let ctx, let event else { return OSStatus(eventNotHandledErr) }
             let me = Unmanaged<HotKey>.fromOpaque(ctx).takeUnretainedValue()
+            var hk = EventHotKeyID()
+            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                              nil, MemoryLayout<EventHotKeyID>.size, nil, &hk)
+            guard hk.id == me.id else { return OSStatus(eventNotHandledErr) }
             DispatchQueue.main.async { me.action() }
             return noErr
         }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), &handler)
-        RegisterEventHotKey(keyCode, modifiers, EventHotKeyID(signature: OSType(0x5049_4552), id: 1),
+        RegisterEventHotKey(keyCode, modifiers, EventHotKeyID(signature: OSType(0x5049_4552), id: id),
                             GetApplicationEventTarget(), 0, &ref)
     }
 
@@ -157,12 +166,74 @@ final class HotKey {
     }
 }
 
+// MARK: Glas-Inseln (Pillen-Stil)
+
+/// Echtes Hintergrund-Glas (Blur des Desktops) in Kapselform.
+struct GlassBackground: NSViewRepresentable {
+    func makeNSView(context: Context) -> CapsuleEffectView {
+        let v = CapsuleEffectView()
+        v.material = .hudWindow
+        v.blendingMode = .behindWindow
+        v.state = .active
+        return v
+    }
+
+    func updateNSView(_ v: CapsuleEffectView, context: Context) {}
+
+    final class CapsuleEffectView: NSVisualEffectView {
+        private var radius: CGFloat = -1
+        override func layout() {
+            super.layout()
+            let r = floor(bounds.height / 2)
+            if r > 0, r != radius {
+                radius = r
+                maskImage = PanelFactory.maskImage(radius: r)
+                window?.invalidateShadow()
+            }
+        }
+        // Klicks/Rechtsklicks gehen an SwiftUI, nicht an das Glas.
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+struct GlassIsland<Content: View>: View {
+    @ViewBuilder var content: Content
+    @Environment(\.dockEdge) private var edge
+
+    var body: some View {
+        // Zur Bildschirmkante hin etwas mehr Platz für den Lauf-Indikator.
+        content
+            .padding(.top, edge == .bottom ? 6 : (edge == .top ? 9 : 7))
+            .padding(.bottom, edge == .bottom ? 9 : (edge == .top ? 6 : 7))
+            .padding(.leading, edge == .left ? 9 : (edge == .right ? 6 : 7))
+            .padding(.trailing, edge == .right ? 9 : (edge == .left ? 6 : 7))
+            .background(GlassBackground())
+            .background(Capsule().fill(Color.black.opacity(0.001)))
+            .overlay(
+                Capsule().fill(
+                    LinearGradient(colors: [Color.white.opacity(0.07), .clear], startPoint: .top, endPoint: .center)
+                )
+                .allowsHitTesting(false)
+            )
+            .overlay(
+                Capsule().strokeBorder(
+                    LinearGradient(colors: [Color.white.opacity(0.24), Color.white.opacity(0.05)],
+                                   startPoint: .top, endPoint: .bottom),
+                    lineWidth: 1
+                )
+                .allowsHitTesting(false)
+            )
+    }
+}
+
 // MARK: Kleine Design-Bausteine
 
 struct DockDivider: View {
     var height: CGFloat
+    /// Waagerechter Strich für die senkrechte Pille.
+    var horizontal = false
     var body: some View {
-        Capsule().fill(Color.primary.opacity(0.16)).frame(width: 1, height: height)
+        Capsule().fill(Color.primary.opacity(0.16)).frame(width: horizontal ? height : 1, height: horizontal ? 1 : height)
     }
 }
 

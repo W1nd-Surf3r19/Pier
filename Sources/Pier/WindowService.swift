@@ -49,6 +49,12 @@ enum WindowService {
         }
     }
 
+    /// IDs der Fenster, die gerade auf dem Bildschirm liegen – also auf dem aktuellen Schreibtisch (Space).
+    static func onScreenWindowIDs() -> Set<CGWindowID> {
+        let info = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return Set(info.compactMap { $0[kCGWindowNumber as String] as? CGWindowID })
+    }
+
     static func raise(_ w: WindowRef) {
         if w.isMinimized {
             AXUIElementSetAttributeValue(w.element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
@@ -61,10 +67,50 @@ enum WindowService {
         AXUIElementSetAttributeValue(w.element, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
     }
 
+    /// Setzt das Fenster so, dass die Mitte seiner Titelleiste am Punkt `p` (Cocoa-Koordinaten) liegt.
+    static func move(_ w: WindowRef, titleBarTo p: NSPoint) {
+        guard let primary = NSScreen.screens.first,
+              let sizeValue: AXValue = attr(w.element, kAXSizeAttribute) else { return }
+        var size = CGSize.zero
+        AXValueGetValue(sizeValue, .cgSize, &size)
+        // AX: Ursprung oben links am Hauptbildschirm, y wächst nach unten.
+        let screen = NSScreen.screens.first { $0.frame.contains(p) } ?? primary
+        let topLimit = primary.frame.height - screen.visibleFrame.maxY
+        var origin = CGPoint(x: (p.x - size.width / 2).rounded(), y: max(primary.frame.height - p.y - 12, topLimit).rounded())
+        if let v = AXValueCreate(.cgPoint, &origin) {
+            AXUIElementSetAttributeValue(w.element, kAXPositionAttribute as CFString, v)
+        }
+    }
+
     static func close(_ w: WindowRef) {
         if let button: AXUIElement = attr(w.element, kAXCloseButtonAttribute) {
             AXUIElementPerformAction(button, kAXPressAction as CFString)
         }
+    }
+
+    struct DockStatus: Equatable, Sendable {
+        var badges: [String: String] = [:]
+        var progress: [String: Double] = [:]
+    }
+
+    /// Badges (z. B. „3“ ungelesene Nachrichten) und Fortschritt liest Pier aus dem ausgeblendeten Mac-Dock.
+    /// Schlüssel wie `PinnedApp.key`: Bundle-ID, sonst Pfad.
+    static func dockStatus() -> DockStatus {
+        guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else { return DockStatus() }
+        let root = AXUIElementCreateApplication(dock.processIdentifier)
+        AXUIElementSetMessagingTimeout(root, 0.25)
+        var result = DockStatus()
+        for list in attr(root, kAXChildrenAttribute) as [AXUIElement]? ?? [] {
+            for item in attr(list, kAXChildrenAttribute) as [AXUIElement]? ?? [] {
+                let label: String? = attr(item, "AXStatusLabel")
+                let progress: NSNumber? = attr(item, "AXProgressValue")
+                guard label?.isEmpty == false || progress != nil, let url: URL = attr(item, "AXURL") else { continue }
+                let key = Bundle(url: url)?.bundleIdentifier ?? url.standardizedFileURL.path
+                if let label, !label.isEmpty { result.badges[key] = label }
+                if let progress { result.progress[key] = min(max(progress.doubleValue, 0), 1) }
+            }
+        }
+        return result
     }
 
     private static func attr<T>(_ el: AXUIElement, _ name: String) -> T? {

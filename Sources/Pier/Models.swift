@@ -23,14 +23,37 @@ struct DockFolder: Codable, Hashable, Identifiable {
     var apps: [PinnedApp] = []
 }
 
+/// Ein echter Finder-Ordner (z. B. Downloads), dessen neueste Dateien als Stapel aufklappen.
+struct DockStack: Codable, Hashable, Identifiable {
+    var id = UUID()
+    var path: String
+    var name: String
+
+    init(url: URL) {
+        path = url.standardizedFileURL.path
+        name = FileManager.default.displayName(atPath: path)
+    }
+
+    var url: URL { URL(fileURLWithPath: path, isDirectory: true) }
+}
+
+/// Trennlinie zwischen Gruppen (wie der Abstandhalter im Mac-Dock).
+struct DockSeparator: Codable, Hashable, Identifiable {
+    var id = UUID()
+}
+
 enum DockEntry: Codable, Hashable, Identifiable {
     case app(PinnedApp)
     case folder(DockFolder)
+    case stack(DockStack)
+    case separator(DockSeparator)
 
     var id: UUID {
         switch self {
         case .app(let a): a.id
         case .folder(let f): f.id
+        case .stack(let s): s.id
+        case .separator(let s): s.id
         }
     }
 }
@@ -39,6 +62,20 @@ enum DockStyle: String, Codable, CaseIterable, Identifiable {
     case pill, bar
     var id: String { rawValue }
     var title: String { self == .pill ? "Schwebende Pille" : "Schlanke Leiste" }
+}
+
+enum DockEdge: String, Codable, CaseIterable, Identifiable {
+    case bottom, left, right, top
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .bottom: "Unten"
+        case .left: "Links"
+        case .right: "Rechts"
+        case .top: "Oben"
+        }
+    }
+    var isVertical: Bool { self == .left || self == .right }
 }
 
 enum AppearanceMode: String, Codable, CaseIterable, Identifiable {
@@ -75,8 +112,25 @@ struct DockSettings: Codable, Equatable {
     var showBattery = true
     var showNowPlaying = true
     var launcherHotKey = true
+    var fitWindows = true
+    var showBadges = true
+    var appHotKeys = false
+    var scrollCyclesWindows = true
+    var showActivity = true
+    var currentSpaceOnly = false
+    var titlebarScroll = false
+    var altTab = false
+    var edge: DockEdge = .bottom
+    var allScreens = false
+    /// Gruppenreihenfolge fürs intelligente Anordnen (AppCategory-Rohwerte, links → rechts). Leer = automatisch.
+    var groupOrder: [String] = []
+    /// Laufende Apps, die Pier nicht zeigt (Schlüssel → Name).
+    var excludedApps: [String: String] = [:]
 
     init() {}
+
+    /// Die Leiste gibt es nur unten (Hohlkehlen, Fenster-Anpassung); seitlich nur die Pille.
+    var effectiveEdge: DockEdge { style == .bar ? .bottom : edge }
 
     // Fehlende Schlüssel (z. B. nach Updates) fallen auf Standardwerte zurück.
     init(from decoder: Decoder) throws {
@@ -97,6 +151,18 @@ struct DockSettings: Codable, Equatable {
         showBattery = v(.showBattery, d.showBattery)
         showNowPlaying = v(.showNowPlaying, d.showNowPlaying)
         launcherHotKey = v(.launcherHotKey, d.launcherHotKey)
+        fitWindows = v(.fitWindows, d.fitWindows)
+        showBadges = v(.showBadges, d.showBadges)
+        appHotKeys = v(.appHotKeys, d.appHotKeys)
+        scrollCyclesWindows = v(.scrollCyclesWindows, d.scrollCyclesWindows)
+        showActivity = v(.showActivity, d.showActivity)
+        currentSpaceOnly = v(.currentSpaceOnly, d.currentSpaceOnly)
+        titlebarScroll = v(.titlebarScroll, d.titlebarScroll)
+        altTab = v(.altTab, d.altTab)
+        edge = v(.edge, d.edge)
+        allScreens = v(.allScreens, d.allScreens)
+        groupOrder = v(.groupOrder, d.groupOrder)
+        excludedApps = v(.excludedApps, d.excludedApps)
     }
 }
 
@@ -116,6 +182,9 @@ enum DockMetrics {
     static let pillRadius: CGFloat = 20
     static let pillBottomGap: CGFloat = 8
     static let popupRadius: CGFloat = 14
+    /// Hohlkehle, mit der die Leiste in die runden Ecken angedockter Fenster übergeht.
+    static let filletRadius: CGFloat = 22
+    static let barCornerRadius: CGFloat = 14
     static func barIcon(_ s: DockSettings) -> CGFloat { max(22, (s.iconSize * 0.66).rounded()) }
     static func barHeight(_ s: DockSettings) -> CGFloat { barIcon(s) + 18 }
 }
