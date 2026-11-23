@@ -10,7 +10,8 @@ IDENTITY="${PIER_SIGN_IDENTITY:-$(cat .sign-identity 2>/dev/null || echo -)}"
 APP="build/Pier.app"
 DEST="$HOME/Applications/Pier.app"
 
-swift build -c release
+# --disable-sandbox: SwiftPMs eigene Sandbox scheitert innerhalb der Homebrew-Sandbox (Paket hat keine Abhängigkeiten).
+swift build -c release --disable-sandbox
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/Pier "$APP/Contents/MacOS/Pier"
