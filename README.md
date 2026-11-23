@@ -1,4 +1,10 @@
+<p align="center"><img src="docs/icon.png" width="128" alt="Pier-Icon"></p>
+
 # Pier
+
+![macOS 15+](https://img.shields.io/badge/macOS-15%2B-blue) ![Swift 6](https://img.shields.io/badge/Swift-6-orange) ![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-green)
+
+> **English:** Pier is a free, open-source Dock replacement for macOS 15+, written in Swift/SwiftUI. It offers a floating pill or a taskbar-style bar on any screen edge, window previews, badges and progress, smart grouping of apps by category, an ⌥Tab window switcher, a launcher and widgets (music, clock, battery, sound, devices). The macOS Dock keeps running hidden, so Mission Control, Spaces and ⌘Tab work as usual. The app and this page are in German; build it yourself with `./build.sh --install` (see below).
 
 Ein eigener Dock-Ersatz für macOS, gebaut mit Swift und SwiftUI. Pier blendet das Mac-Dock aus und stellt es beim Beenden wieder her. Der Dock-Prozess selbst läuft weiter, deshalb funktionieren Mission Control, Spaces und ⌘-Tab wie gewohnt.
 
@@ -20,7 +26,7 @@ Ein eigener Dock-Ersatz für macOS, gebaut mit Swift und SwiftUI. Pier blendet d
 - Anpinnen und Lösen über das Kontextmenü, Drag & Drop (Datei auf App öffnet sie, `.app` pinnt an, Ordner wird zum Stapel, andere Dateien auf freier Fläche werden angepinnt)
 - Reihenfolge der laufenden, nicht angepinnten Apps: nach Start, alphabetisch oder in ihre Gruppe einsortiert – z. B. landet ein geöffnetes Xcode hinter den angepinnten Entwickler-Apps (angepinnte bleiben in deiner Reihenfolge)
 - Finder-Stapel mit den neuesten Dateien eines Ordners
-- „Intelligent anordnen“: gruppiert Apps nach Kategorie und Nutzung, mit Trennlinien und verschiebbaren Gruppen
+- „Intelligent anordnen“: gruppiert Apps nach Kategorie und Nutzung, mit Trennlinien und verschiebbaren Gruppen; zeigt für alle installierten Apps, in welche Gruppe sie beim Öffnen kommen
 - ⌃ halten zeigt CPU- und Speicherverbrauch der laufenden Apps
 - Apps lassen sich von der Anzeige ausschließen, „Sofort beenden…“ fragt vorher nach
 
@@ -48,17 +54,31 @@ Ein eigener Dock-Ersatz für macOS, gebaut mit Swift und SwiftUI. Pier blendet d
 - Swift 6 (Xcode oder Command Line Tools)
 - Berechtigungen unter *Systemeinstellungen › Datenschutz & Sicherheit*: **Bedienungshilfen** (für Fenster, Badges und Tastenkürzel) und **Bildschirmaufnahme** (für die Fenster-Vorschau); **Bluetooth** nur, wenn die Bluetooth-Liste eingeschaltet ist (macOS fragt beim ersten Öffnen)
 
+## Datenschutz und Berechtigungen
+
+- Pier sendet keine Daten ins Internet. Die einzige Netzabfrage lädt das Spotify-Cover von der Adresse, die Spotify selbst liefert.
+- Nutzungsdaten für „Intelligent anordnen“ (wie lange welche App vorn war) bleiben lokal in `~/Library/Application Support/Pier/usage.json`.
+- Pier ändert die Mac-Dock-Einstellungen `autohide` und `autohide-delay`, um das Mac-Dock auszublenden, und stellt sie beim Beenden wieder her.
+- Details und Meldung von Sicherheitslücken: [SECURITY.md](SECURITY.md)
+
 ## Bauen und installieren
 
+Es gibt (noch) keine fertige App zum Download – Pier wird aus dem Quellcode gebaut:
+
 ```sh
+git clone https://github.com/W1nd-Surf3r19/Pier.git
+cd Pier
 ./build.sh            # baut build/Pier.app
 ./build.sh --install  # baut, beendet ein laufendes Pier und installiert nach ~/Applications
+open ~/Applications/Pier.app
 ```
 
-`build.sh` signiert die App mit einer festen Identität, damit die Berechtigungen nach einem Rebuild erhalten bleiben. Eine eigene Identität setzt du so (der Hash steht in der Ausgabe von `security find-identity -p codesigning`):
+Ohne eigene Signatur signiert `build.sh` ad hoc. Das funktioniert, aber macOS fragt nach jedem Neubau erneut nach Bedienungshilfen und Bildschirmaufnahme. Mit einem Zertifikat aus der Schlüsselbundverwaltung (z. B. ein kostenloses „Apple Development“-Zertifikat aus Xcode) bleiben die Berechtigungen erhalten. Den Hash zeigt `security find-identity -p codesigning`:
 
 ```sh
 PIER_SIGN_IDENTITY=<SHA-1-Hash> ./build.sh --install
+# oder dauerhaft, die Datei ist von Git ausgenommen:
+echo <SHA-1-Hash> > .sign-identity
 ```
 
 ## Tests
@@ -71,8 +91,22 @@ swift test
 
 Angepinnte Apps, Ordner und Einstellungen liegen in `~/Library/Application Support/Pier/config.json`. Ändern lässt sich alles über das Einstellungsfenster.
 
+## Deinstallieren und Mac-Dock zurückholen
+
+Pier über sein Menü beenden („Pier beenden“) – dabei kommt das Mac-Dock zurück. Danach `~/Applications/Pier.app` und `~/Library/Application Support/Pier` löschen.
+
+Ist Pier abgestürzt oder wurde gelöscht, ohne es zu beenden, bleibt das Mac-Dock unsichtbar. So holst du es zurück:
+
+```sh
+defaults delete com.apple.dock autohide-delay; defaults write com.apple.dock autohide -bool false; killall Dock
+```
+
 ## Bekannte Grenzen
 
 - Fenster in einen anderen Space zu verschieben oder die Nummer eines Space anzuzeigen geht nur über private APIs und ist deshalb nicht eingebaut.
 - Jedes Dock zeigt alle Fenster an, nicht nur die auf seinem Bildschirm.
 - Mit mehreren Bildschirmen ist Pier bisher nicht getestet.
+
+## Lizenz
+
+[MIT](LICENSE) © 2026 Malte Rill. Das App-Icon wurde mit Google Gemini erstellt.

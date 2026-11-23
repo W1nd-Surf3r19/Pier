@@ -4,7 +4,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-IDENTITY="${PIER_SIGN_IDENTITY:-A910E2703F005D185988AB80C46030C706BCC50B}"
+# Eigene Identität: PIER_SIGN_IDENTITY setzen oder den Hash in die (ignorierte) Datei .sign-identity schreiben.
+# Ohne beides wird ad hoc signiert – dann fragt macOS nach jedem Neubau erneut nach den Berechtigungen.
+IDENTITY="${PIER_SIGN_IDENTITY:-$(cat .sign-identity 2>/dev/null || echo -)}"
 APP="build/Pier.app"
 DEST="$HOME/Applications/Pier.app"
 
