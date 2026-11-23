@@ -8,6 +8,8 @@ Ein eigener Dock-Ersatz für macOS, gebaut mit Swift und SwiftUI. Pier blendet d
 - Zwei Stile: schwebende Pille (Launcher · Apps · Widgets) oder durchgehende Leiste
 - Position unten, links, rechts oder oben (gilt nur für die Pille, die Leiste ist immer unten), auf Wunsch auf allen Bildschirmen
 - Automatisches Ausblenden
+- Neun Farbthemen (System, Graphit, Mitternacht, Ozean, Lavendel, Koralle, Salbei, Abendrot, Transparent): Akzentfarbe für die aktive App, Fortschritt und Auswahl sowie eine leichte Tönung des Glases von Dock, Popups, Launcher und ⌥Tab. „Transparent“ lässt das Glas im Dock ganz weg
+- Beschriftung der Leiste: automatisch (Name nur bei genug Platz), nur Icons oder immer Icon und Text
 - Badges, Fortschrittsbalken und kurzes Aufleuchten, wenn ein Badge erscheint oder steigt (die Werte kommen aus dem versteckten Mac-Dock)
 - Anpinnen und Lösen über das Kontextmenü, Drag & Drop (Datei auf App öffnet sie, `.app` pinnt an, Ordner wird zum Stapel)
 - Finder-Stapel mit den neuesten Dateien eines Ordners
