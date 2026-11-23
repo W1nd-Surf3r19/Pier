@@ -129,7 +129,6 @@ struct BarDockView: View {
         }
         .padding(.top, 1)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(settings.theme.glassTint)
         .contentShape(Rectangle())
     }
 

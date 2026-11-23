@@ -180,6 +180,8 @@ struct PopupRootView: View {
             }
         }
         .fixedSize()
+        // Panel ist genau so groß wie der Inhalt – gleiche Rundung wie die Glas-Maske (PanelFactory.maskImage).
+        .background(RoundedRectangle(cornerRadius: DockMetrics.popupRadius).fill(DockStore.shared.settings.theme.glassTint))
         .onGeometryChange(for: CGSize.self) { $0.size } action: { onSize($0) }
         .onHoverAlways { h, _ in Coordinator.shared.popup.setPopupHovered(h) }
         .environment(\.dockTheme, DockStore.shared.settings.theme)

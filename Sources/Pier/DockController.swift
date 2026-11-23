@@ -21,6 +21,8 @@ final class DockController {
     private let fit = DockFit()
     private var screenObserver: NSObjectProtocol?
     private let effect: NSVisualEffectView
+    /// Tönung des Farbthemas – liegt im Glas, damit sie dieselbe Form (Ecken, Hohlkehlen) bekommt.
+    private let tint = CAGradientLayer()
     private let hosting: FirstMouseHostingView<DockRootView>
     private var settings = DockSettings()
     private var pillSize = CGSize(width: 300, height: 60)
@@ -55,6 +57,14 @@ final class DockController {
         effect.frame = container.bounds
         effect.autoresizingMask = [.width, .height]
         container.addSubview(effect)
+        effect.wantsLayer = true
+        let tintView = NSView(frame: effect.bounds)
+        tintView.layer = tint
+        tintView.wantsLayer = true
+        tintView.autoresizingMask = [.width, .height]
+        tint.startPoint = CGPoint(x: 0, y: 1)
+        tint.endPoint = CGPoint(x: 1, y: 0)
+        effect.addSubview(tintView)
         hosting.frame = container.bounds
         hosting.autoresizingMask = [.width, .height]
         container.addSubview(hosting)
@@ -89,6 +99,7 @@ final class DockController {
         let styleChanged = s.style != settings.style || s.effectiveEdge != settings.effectiveEdge
         settings = s
         effect.isHidden = s.style == .pill
+        tint.colors = s.theme.glass.isEmpty ? nil : s.theme.glass.map { NSColor($0).withAlphaComponent(0.2).cgColor }
         if s.style == .bar {
             // Leiste unten im Panel, darüber ein transparenter Streifen für die Hohlkehlen.
             hosting.frame = NSRect(x: 0, y: 0, width: panel.frame.width, height: DockMetrics.barHeight(s))
@@ -236,7 +247,13 @@ final class DockController {
         guard force || new != fillets || size != shapeSize else { return }
         fillets = new
         shapeSize = size
-        effect.maskImage = barMask(size: size)
+        let mask = barMask(size: size)
+        effect.maskImage = mask
+        // maskImage schneidet nur das Glas zu, nicht dessen Unterebenen – die Tönung braucht dieselbe Form.
+        let tintMask = CALayer()
+        tintMask.frame = CGRect(origin: .zero, size: size)
+        tintMask.contents = mask
+        tint.mask = tintMask
         panel.invalidateShadow()
     }
 
