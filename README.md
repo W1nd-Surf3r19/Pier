@@ -18,7 +18,7 @@ Ein eigener Dock-Ersatz für macOS, gebaut mit Swift und SwiftUI. Pier blendet d
 - App-Fortschritt: Downloads und Kopiervorgänge füllen den Tab und zeigen „14 %“; die Titelposition von Music, Spotify und VLC erscheint als grüner Balken (Music und VLC fragen beim ersten Mal nach der Erlaubnis, sie zu steuern)
 - App-Status: startende Apps mit wandernden Streifen, Apps, die nicht reagieren, mit roten Streifen und „Reagiert nicht“; ausgeblendete Apps und minimierte Fenster abgeblendet
 - Anpinnen und Lösen über das Kontextmenü, Drag & Drop (Datei auf App öffnet sie, `.app` pinnt an, Ordner wird zum Stapel, andere Dateien auf freier Fläche werden angepinnt)
-- Reihenfolge der laufenden, nicht angepinnten Apps: nach Start oder alphabetisch (angepinnte bleiben in deiner Reihenfolge)
+- Reihenfolge der laufenden, nicht angepinnten Apps: nach Start, alphabetisch oder in ihre Gruppe einsortiert – z. B. landet ein geöffnetes Xcode hinter den angepinnten Entwickler-Apps (angepinnte bleiben in deiner Reihenfolge)
 - Finder-Stapel mit den neuesten Dateien eines Ordners
 - „Intelligent anordnen“: gruppiert Apps nach Kategorie und Nutzung, mit Trennlinien und verschiebbaren Gruppen
 - ⌃ halten zeigt CPU- und Speicherverbrauch der laufenden Apps

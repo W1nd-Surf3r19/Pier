@@ -212,7 +212,7 @@ final class RunningAppsModel: ObservableObject {
     nonisolated static func ordered<T>(_ items: [T], by order: RunningOrder, name: (T) -> String, launched: (T) -> Date?) -> [T] {
         items.enumerated().sorted { a, b in
             switch order {
-            case .launch:
+            case .launch, .grouped:
                 let da = launched(a.element) ?? .distantPast, db = launched(b.element) ?? .distantPast
                 return da != db ? da < db : a.offset < b.offset
             case .alphabetical:

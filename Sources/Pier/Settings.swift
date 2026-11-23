@@ -648,6 +648,8 @@ struct ArrangeSheet: View {
     /// Gruppenreihenfolge, die du hier festlegst; leer = automatisch nach Nutzung.
     @State private var order: [AppCategory] = []
     @State private var orderChanged = false
+    /// Alle installierten, nicht angehefteten Apps je Gruppe – dort landen sie beim Öffnen.
+    @State private var installed: [AppCategory: [String]] = [:]
 
     private var days: Int { usage.book.trackedDays(now: Date()) }
     private var canFindRare: Bool { days >= 14 }
@@ -675,6 +677,10 @@ struct ArrangeSheet: View {
                 Toggle("Selten benutzte Apps in den Ordner „\(SmartArranger.rareFolderName)“", isOn: $options.rareIntoFolder)
                     .disabled(!canFindRare)
                     .help(canFindRare ? "" : "Pier braucht dafür mindestens 14 Tage Nutzungsdaten.")
+                Toggle("Geöffnete, nicht angeheftete Apps in ihre Gruppe einsortieren", isOn: Binding(
+                    get: { store.settings.runningOrder == .grouped },
+                    set: { store.settings.runningOrder = $0 ? .grouped : .launch }))
+                    .help("Gilt für alle installierten Apps; ohne eigene Gruppe im Dock kommt eine App neben die nächste Gruppe.")
             }
 
             HStack {
@@ -694,7 +700,7 @@ struct ArrangeSheet: View {
             List {
                 ForEach(Array(plan.groups.enumerated()), id: \.element.id) { i, g in
                     PlanRow(title: g.category.title, symbol: g.category.symbol, apps: g.apps, newKeys: newKeys,
-                            declined: $declined,
+                            declined: $declined, onOpen: shownInstalled(g, in: plan),
                             move: (up: i > 0 ? { moveGroup(from: i, to: i - 1, in: plan) } : nil,
                                    down: i < plan.groups.count - 1 ? { moveGroup(from: i, to: i + 2, in: plan) } : nil))
                 }
@@ -709,6 +715,10 @@ struct ArrangeSheet: View {
             }
             .listStyle(.inset)
             .frame(maxHeight: .infinity)
+            if store.settings.runningOrder == .grouped, case let loose = looseGroups(plan), !loose.isEmpty {
+                Text("Ohne eigene Gruppe, kommen neben die nächste: " + loose)
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
 
             HStack {
                 if pinSuggestions && !newKeys.isEmpty {
@@ -731,6 +741,27 @@ struct ArrangeSheet: View {
             suggestions = Self.suggestions(usage: usage)
             order = store.settings.groupOrder.compactMap(AppCategory.init(rawValue:))
         }
+        .task {
+            // Alle Apps des Macs durchgehen (Bundle-Infos lesen) – abseits des Hauptthreads.
+            installed = await Task.detached {
+                Dictionary(grouping: AppCatalog.scan()) { SmartArranger.category(url: $0.url, bundleID: nil) }
+                    .mapValues { $0.map(\.id) }
+            }.value
+        }
+    }
+
+    /// Installierte Apps dieser Gruppe, die nicht im Dock stehen (nur bei „einsortieren“).
+    private func shownInstalled(_ g: SmartArranger.Group, in plan: SmartArranger.Plan) -> [String] {
+        guard store.settings.runningOrder == .grouped else { return [] }
+        let inDock = Set(plan.groups.flatMap(\.apps).map(\.path) + plan.rare.map(\.path))
+        return (installed[g.category] ?? []).filter { !inDock.contains($0) }.map { AppName.display(forPath: $0) }
+    }
+
+    /// Kategorien mit installierten Apps, aber ohne Gruppe im Dock.
+    private func looseGroups(_ plan: SmartArranger.Plan) -> String {
+        let shown = Set(plan.groups.map(\.category))
+        return AppCategory.allCases.filter { !shown.contains($0) && !(installed[$0] ?? []).isEmpty }
+            .map { "\($0.title) (\(installed[$0]!.count))" }.joined(separator: ", ")
     }
 
     /// Verschiebt eine Gruppe; ab dann gilt die angezeigte Reihenfolge als festgelegt.
@@ -782,6 +813,8 @@ struct PlanRow: View {
     let apps: [PinnedApp]
     let newKeys: Set<String>
     @Binding var declined: Set<String>
+    /// Installierte Apps, die beim Öffnen in diese Gruppe kommen.
+    var onOpen: [String] = []
     /// Pfeile zum Verschieben (nil = Gruppe ist nicht verschiebbar bzw. steht schon am Rand).
     let move: (up: (() -> Void)?, down: (() -> Void)?)?
 
@@ -824,6 +857,11 @@ struct PlanRow: View {
                     .onTapGesture { if isNew { declined.insert(app.key) } }
                     .help(isNew ? "Antippen: nicht anheften" : "")
                 }
+            }
+            if !onOpen.isEmpty {
+                Text("Beim Öffnen hier: " + onOpen.joined(separator: ", "))
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                    .help(onOpen.joined(separator: "\n"))
             }
         }
     }

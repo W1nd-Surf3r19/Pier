@@ -448,3 +448,19 @@ private func allAppKeys(_ entries: [DockEntry]) -> [String] {
     let new = try JSONDecoder().decode(DockSettings.self, from: Data(#"{"style":"bar","edge":"left","barRows":1}"#.utf8))
     #expect(new.edge == .left)
 }
+
+@Test func runningAppsJoinTheirGroup() {
+    let web = PinnedApp(url: URL(fileURLWithPath: "/Applications/Safari.app")), dev = PinnedApp(url: URL(fileURLWithPath: "/Applications/Terminal.app"))
+    let entries: [DockEntry] = [.app(web), .separator(DockSeparator()), .app(dev)]
+    let cat: [String: AppCategory] = ["Xcode": .development, "Firefox": .internet, "Spiel": .games, "Fotos": .creative, "Finder": .finder]
+    let apps = ["Xcode", "Firefox", "Spiel", "Fotos", "Finder"]
+    let pinned: (PinnedApp) -> AppCategory = { $0 == web ? .internet : .development }
+    let placed = SmartArranger.place(apps, in: entries, order: [], category: { cat[$0]! }, pinnedCategory: pinned)
+    // Eigene Gruppe; Spiele/Kreativ ohne Gruppe → hinter Entwicklung (davor in fester Reihenfolge); Finder ganz vorn.
+    #expect(placed.after == [-1: ["Finder"], 0: ["Firefox"], 2: ["Xcode", "Spiel", "Fotos"]])
+    #expect(placed.rest.isEmpty)
+    // Gespeicherte Gruppenreihenfolge zählt: Kreativ steht vor Internet → ganz vorn.
+    let ordered = SmartArranger.place(["Fotos"], in: entries, order: [.creative, .internet], category: { cat[$0]! }, pinnedCategory: pinned)
+    #expect(ordered.after == [-1: ["Fotos"]])
+    #expect(SmartArranger.place(apps, in: [], order: [], category: { cat[$0]! }, pinnedCategory: pinned).rest == apps)
+}

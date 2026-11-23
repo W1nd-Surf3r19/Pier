@@ -111,9 +111,15 @@ enum PillPlacement: String, Codable, CaseIterable, Identifiable {
 
 /// Reihenfolge der laufenden, nicht angepinnten Apps (angepinnte bleiben in deiner Reihenfolge).
 enum RunningOrder: String, Codable, CaseIterable, Identifiable {
-    case launch, alphabetical
+    case launch, alphabetical, grouped
     var id: String { rawValue }
-    var title: String { self == .launch ? "Nach Start" : "Alphabetisch" }
+    var title: String {
+        switch self {
+        case .launch: "Nach Start"
+        case .alphabetical: "Alphabetisch"
+        case .grouped: "In Gruppen einsortieren"
+        }
+    }
 }
 
 /// Mehrere Fenster einer App in der Leiste: ein Tab je Fenster oder ein gemeinsamer Tab.

@@ -81,13 +81,29 @@ enum SmartArranger {
         // Werkzeuge
         "com.apple.finder": .finder, "com.apple.systempreferences": .utilities, "com.bitwarden.desktop": .utilities,
         "com.apple.ActivityMonitor": .utilities, "com.apple.AppStore": .utilities, "com.apple.Maps": .utilities,
+        "com.apple.calculator": .utilities, "com.apple.clock": .utilities, "com.apple.DiskUtility": .utilities,
+        "com.apple.findmy": .utilities, "com.apple.Home": .utilities, "com.apple.ScreenContinuity": .utilities,
+        "com.apple.Passwords": .utilities, "com.apple.weather": .utilities, "com.apple.Magnifier": .utilities,
+        "com.apple.siri.launcher": .utilities, "com.raycast.macos": .utilities, "com.crowdcafe.windowmagnet": .utilities,
+        "com.bettershot.app": .utilities, "com.9031.fliqloMA": .utilities, "com.synology.CloudStation": .utilities,
+        "com.teamviewer.TeamViewer": .utilities, "com.caye.macosdockcc.v2": .utilities, "org.openvpn.client.app": .utilities,
+        "com.displaylink.DisplayLinkUserAgent": .utilities, "com.apple.DigitalColorMeter": .utilities,
+        "com.apple.ColorSyncUtility": .utilities, "com.microsoft.wdav.shim": .utilities, "com.microsoft.wdav": .utilities,
+        // weitere aus macOS und Alltag
+        "com.apple.mobilephone": .communication, "com.apple.news": .internet, "com.apple.stocks": .internet,
+        "com.apple.iBooksX": .media, "com.apple.journal": .work, "com.apple.Stickies": .work, "com.apple.Dictionary": .work,
+        "com.adammierzwa.uninotes": .work, "com.apple.GenerativePlaygroundApp": .creative, "com.apple.campo": .ai,
+        "com.bambulab.bambu-studio": .creative, "com.IdeaPunch.ColorSlurp": .creative,
+        "developer.apple.wwdc-Release": .development, "com.anthropic.claude-code-url-handler": .development,
+        "org.python.IDLE": .development, "org.python.PythonLauncher": .development,
+        "com.apple.appleseed.FeedbackAssistant": .development, "desktop.op.gg": .games, "ModrinthApp": .games,
     ]
 
     private static let prefixes: [(String, AppCategory)] = [
         ("com.google.Chrome", .internet), ("com.apple.dt.", .development), ("com.jetbrains.", .development),
         ("com.sublimetext.", .development), ("com.apple.iWork.", .work), ("com.adobe.", .creative),
         ("com.pixelmatorteam.", .creative), ("com.seriflabs.", .creative), ("com.1password", .utilities),
-        ("com.riotgames.", .games),
+        ("com.riotgames.", .games), ("com.wacom.", .utilities),
     ]
 
     private static let plist: [String: AppCategory] = [
@@ -114,9 +130,44 @@ enum SmartArranger {
         return .other
     }
 
-    static func category(of app: PinnedApp) -> AppCategory {
-        let plist = Bundle(url: app.url)?.infoDictionary?["LSApplicationCategoryType"] as? String
-        return category(bundleID: app.bundleID, plistCategory: plist)
+    static func category(of app: PinnedApp) -> AppCategory { category(url: app.url, bundleID: app.bundleID) }
+
+    static func category(url: URL, bundleID: String?) -> AppCategory {
+        let bundle = Bundle(url: url)
+        let plist = bundle?.infoDictionary?["LSApplicationCategoryType"] as? String
+        return category(bundleID: bundleID ?? bundle?.bundleIdentifier, plistCategory: plist)
+    }
+
+    /// Laufende, nicht angepinnte Apps hinter die letzte angepinnte App ihrer Gruppe (Schlüssel = Index in `entries`).
+    /// Hat ihre Gruppe keine angepinnte App, kommen sie hinter die nächste Gruppe davor (laut `order`, sonst
+    /// feste Reihenfolge), gibt es keine davor, ganz nach vorn (Schlüssel -1). `rest` nur bei einem Dock ohne Apps.
+    nonisolated static func place<T>(_ apps: [T], in entries: [DockEntry], order: [AppCategory],
+                                     category: (T) -> AppCategory,
+                                     pinnedCategory: (PinnedApp) -> AppCategory) -> (after: [Int: [T]], rest: [T]) {
+        var last: [AppCategory: Int] = [:]
+        for (i, e) in entries.enumerated() { if case .app(let a) = e { last[pinnedCategory(a)] = i } }
+        var ref = order
+        for c in AppCategory.allCases where !ref.contains(c) { ref.append(c) }
+        var after: [Int: [T]] = [:], rest: [T] = []
+        for app in apps {
+            let pos = ref.firstIndex(of: category(app))!
+            if let i = ref[...pos].reversed().lazy.compactMap({ last[$0] }).first {
+                after[i, default: []].append(app)
+            } else if !last.isEmpty {
+                after[-1, default: []].append(app)
+            } else {
+                rest.append(app)
+            }
+        }
+        return (after, rest)
+    }
+
+    @MainActor static func placeRunning(_ apps: [NSRunningApplication], in entries: [DockEntry],
+                                        settings: DockSettings) -> (after: [Int: [NSRunningApplication]], rest: [NSRunningApplication]) {
+        guard settings.runningOrder == .grouped else { return ([:], apps) }
+        return place(apps, in: entries, order: settings.groupOrder.compactMap(AppCategory.init(rawValue:)), category: { app in
+            app.bundleURL.map { category(url: $0, bundleID: app.bundleIdentifier) } ?? .other
+        }, pinnedCategory: category(of:))
     }
 
     // MARK: Planer

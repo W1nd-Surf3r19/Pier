@@ -45,6 +45,7 @@ struct PillDockView: View {
     var body: some View {
         let size = (CGFloat(settings.iconSize) * fit.scale).rounded()
         let extra = settings.showRunningApps ? running.unpinnedApps(pinned: store.topLevelKeys) : []
+        let placed = SmartArranger.placeRunning(extra, in: store.entries, settings: settings)
         let vertical = settings.effectiveEdge.isVertical
         let strip = WidgetStrip(settings: settings, compact: true, vertical: vertical)
         let outer = vertical ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
@@ -75,10 +76,10 @@ struct PillDockView: View {
             }
             GlassIsland(endInset: 6) {
                 inner {
-                    EntryIcons(entries: store.entries, size: size)
-                    if !extra.isEmpty {
+                    EntryIcons(entries: store.entries, size: size, running: placed.after)
+                    if !placed.rest.isEmpty {
                         DockDivider(height: size * 0.55, horizontal: vertical).padding(vertical ? .vertical : .horizontal, 7)
-                        ForEach(extra, id: \.processIdentifier) { RunningAppIcon(app: $0, size: size) }
+                        ForEach(placed.rest, id: \.processIdentifier) { RunningAppIcon(app: $0, size: size) }
                     }
                 }
             }
@@ -185,11 +186,13 @@ struct BarDockView: View {
     }
 
     /// Angepinnte Apps in deiner Reihenfolge – laufen sie, stehen ihre Fenster an genau dieser Stelle.
-    /// Danach alle übrigen laufenden Apps.
+    /// Danach alle übrigen laufenden Apps (bei „In Gruppen einsortieren“ hinter ihrer Gruppe, sonst hinten).
     private func items(grouped: Bool) -> [BarItem] {
         var result: [BarItem] = settings.showLauncher ? [.launcher] : []
-        var used = Set<pid_t>()
-        for entry in store.entries {
+        let extra = settings.showRunningApps ? running.unpinnedApps(pinned: store.topLevelKeys) : []
+        let placed = SmartArranger.placeRunning(extra, in: store.entries, settings: settings)
+        for app in placed.after[-1] ?? [] { result += running.tasks(for: app, grouped: grouped).map(BarItem.task) }
+        for (i, entry) in store.entries.enumerated() {
             switch entry {
             case .folder(let f):
                 result.append(.folder(f))
@@ -201,18 +204,14 @@ struct BarDockView: View {
                 result.append(.separator(s.id))
             case .app(let a):
                 if let app = running.app(forKey: a.key) {
-                    used.insert(app.processIdentifier)
                     result += running.tasks(for: app, grouped: grouped).map(BarItem.task)
                 } else {
                     result.append(.pinned(a))
                 }
             }
+            for app in placed.after[i] ?? [] { result += running.tasks(for: app, grouped: grouped).map(BarItem.task) }
         }
-        if settings.showRunningApps {
-            for app in running.otherApps where !used.contains(app.processIdentifier) {
-                result += running.tasks(for: app, grouped: grouped).map(BarItem.task)
-            }
-        }
+        for app in placed.rest { result += running.tasks(for: app, grouped: grouped).map(BarItem.task) }
         // Schmale seitliche Leiste („Nur Icons“): kein Platz für den Musik-Tab – dann bleibt das Widget.
         let narrow = settings.effectiveEdge.isVertical && settings.barLabels == .iconsOnly
         if settings.showNowPlaying, !narrow, let player = widgets.nowPlaying?.playerBundleID,
@@ -612,10 +611,13 @@ struct BarTab<Label: View>: View {
 struct EntryIcons: View {
     let entries: [DockEntry]
     let size: CGFloat
+    /// Laufende Apps, die hinter dem Eintrag mit diesem Index einsortiert werden.
+    var running: [Int: [NSRunningApplication]] = [:]
     @Environment(\.dockEdge) private var edge
 
     var body: some View {
-        ForEach(entries) { entry in
+        ForEach(running[-1] ?? [], id: \.processIdentifier) { RunningAppIcon(app: $0, size: size) }
+        ForEach(Array(entries.enumerated()), id: \.element.id) { i, entry in
             switch entry {
             case .app(let app): PinnedAppIcon(app: app, size: size)
             case .folder(let f): FolderTile(folder: f, size: size)
@@ -625,6 +627,7 @@ struct EntryIcons: View {
                 DockDivider(height: size * 0.55, horizontal: edge.isVertical)
                     .padding(edge.isVertical ? .vertical : .horizontal, 7)
             }
+            ForEach(running[i] ?? [], id: \.processIdentifier) { RunningAppIcon(app: $0, size: size) }
         }
     }
 }
