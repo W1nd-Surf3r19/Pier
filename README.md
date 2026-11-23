@@ -63,7 +63,15 @@ Ein eigener Dock-Ersatz für macOS, gebaut mit Swift und SwiftUI. Pier blendet d
 
 ## Bauen und installieren
 
-Es gibt (noch) keine fertige App zum Download – Pier wird aus dem Quellcode gebaut:
+Es gibt keine fertige App zum Download – Pier wird aus dem Quellcode gebaut, am einfachsten mit Homebrew (Xcode 16 oder neuer nötig):
+
+```sh
+brew install w1nd-surf3r19/pier/pier
+ln -sf "$(brew --prefix)/opt/pier/Pier.app" ~/Applications/Pier.app
+open ~/Applications/Pier.app
+```
+
+Oder von Hand:
 
 ```sh
 git clone https://github.com/W1nd-Surf3r19/Pier.git
