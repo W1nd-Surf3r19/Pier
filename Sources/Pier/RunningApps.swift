@@ -28,6 +28,9 @@ final class RunningAppsModel: ObservableObject {
     @Published private(set) var progress: [String: Double] = [:]
     /// Apps, deren Badge gerade neu erschienen oder gestiegen ist – das Icon leuchtet kurz auf.
     @Published private(set) var attention: Set<String> = []
+    /// Apps, die mehrmals in Folge nicht geantwortet haben („reagiert nicht“).
+    @Published private(set) var hung: Set<pid_t> = []
+    private var axFailures: [pid_t: Int] = [:]
     @Published private(set) var axTrusted = AXIsProcessTrusted()
     @Published private(set) var screenRecording = CGPreflightScreenCaptureAccess()
 
@@ -73,11 +76,19 @@ final class RunningAppsModel: ObservableObject {
         refreshing = true
         let pids = apps.map(\.processIdentifier)
         Task.detached(priority: .userInitiated) {
-            let result = WindowService.windows(for: pids)
+            let scan = WindowService.windows(for: pids)
             let status = WindowService.dockStatus()
             let onScreen = WindowService.onScreenWindowIDs()
             await MainActor.run {
+                // Wer nicht antwortet, behält seine letzten Fenster – sonst fielen die Tabs gerade dann zusammen.
+                var result = scan.windows
+                for pid in scan.unresponsive { if let old = self.windows[pid] { result[pid] = old } }
                 if result != self.windows { self.windows = result }
+                // Startende Apps antworten oft noch nicht – sie zählen nicht als hängend.
+                let settled = Set(self.apps.filter { ($0.launchDate ?? .distantPast).timeIntervalSinceNow < -10 }.map(\.processIdentifier))
+                let h = Self.updateHung(failures: self.axFailures, unresponsive: scan.unresponsive.intersection(settled))
+                self.axFailures = h.failures
+                if h.hung != self.hung { self.hung = h.hung }
                 if onScreen != self.onScreen { self.onScreen = onScreen }
                 if status.badges != self.badges {
                     if self.statusLoaded { self.flashNewBadges(old: self.badges, new: status.badges) }
@@ -104,7 +115,30 @@ final class RunningAppsModel: ObservableObject {
         return false
     }
 
+    /// Erst nach `threshold` Fehlversuchen in Folge gilt eine App als hängend; jede Antwort setzt zurück.
+    nonisolated static func updateHung(failures: [pid_t: Int], unresponsive: Set<pid_t>,
+                                       threshold: Int = 4) -> (failures: [pid_t: Int], hung: Set<pid_t>) {
+        var next: [pid_t: Int] = [:]
+        for pid in unresponsive { next[pid] = (failures[pid] ?? 0) + 1 }
+        return (next, Set(next.filter { $0.value >= threshold }.keys))
+    }
+
     // MARK: Abfragen
+
+    func isHung(_ key: String) -> Bool {
+        app(forKey: key).map { hung.contains($0.processIdentifier) } ?? false
+    }
+
+    func isLaunching(_ key: String) -> Bool { launching.contains(key) }
+
+    /// Name mit Status für Tooltips, z. B. „Nachrichten · 3“ oder „Xcode · reagiert nicht“.
+    func label(_ name: String, key: String?) -> String {
+        guard let key else { return name }
+        var parts = [name]
+        if DockStore.shared.settings.showBadges, let b = badges[key] { parts.append(b) }
+        if isHung(key) { parts.append("reagiert nicht") }
+        return parts.joined(separator: " · ")
+    }
 
     /// Fenster einer App, wie Pier sie zeigt: auf Wunsch nur die des aktuellen Schreibtischs.
     /// Minimierte Fenster und Fenster ausgeblendeter Apps liegen nie auf dem Bildschirm – sie bleiben drin.

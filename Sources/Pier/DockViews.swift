@@ -210,6 +210,7 @@ struct BarItemView: View {
     let width: CGFloat
     let showTitle: Bool
     @ObservedObject var running = RunningAppsModel.shared
+    @ObservedObject var store = DockStore.shared
     @Environment(\.dockTheme) private var theme
     @State private var anchor: CGRect = .zero
 
@@ -224,9 +225,9 @@ struct BarItemView: View {
             }
         case .pinned(let a):
             BarTab(height: height, width: width, filled: false,
-                   launching: running.state(forKey: a.key) == .launching, hover: .label(a.name),
+                   launching: running.isLaunching(a.key), hover: .label(running.label(a.name, key: a.key)),
                    action: { Coordinator.shared.clickApp(key: a.key, url: a.url) }) {
-                TabIcon(image: IconCache.icon(forPath: a.path)).dockBadge(a.key)
+                TabIcon(image: IconCache.icon(forPath: a.path)).dockBadge(a.key, inBar: true)
             }
             .dropDestination(for: URL.self) { urls, _ in Coordinator.shared.drop(urls, onto: a.url) }
             .contextMenu { PinnedAppMenu(app: a) }
@@ -248,12 +249,21 @@ struct BarItemView: View {
             .onHoverAlways { h, r in if h { anchor = r } }
             .contextMenu { StackMenu(stack: s) }
         case .task(let t):
-            BarTab(height: height, width: width, filled: true, active: t.isActive, dimmed: t.isMinimized,
-                   hover: t.window.map { .window($0) } ?? .label(t.title), hoverAlways: !showTitle,
+            // Badge, Fortschritt und Blinken gehören zur App – sie erscheinen nur am ersten Tab.
+            let key = AppName.key(t.app)
+            let first = isFirstTab(t)
+            let hung = running.hung.contains(t.app.processIdentifier)
+            let progress = first && store.settings.showBadges ? running.progress[key] : nil
+            BarTab(height: height, width: width, filled: true, active: t.isActive,
+                   dimmed: t.isMinimized || t.app.isHidden, hung: hung,
+                   attention: first && running.attention.contains(key),
+                   progress: progress, mediaKey: first ? key : nil,
+                   badge: first && showTitle && store.settings.showBadges ? running.badges[key] : nil,
+                   hover: t.window.map { .window($0) } ?? .label(running.label(t.title, key: key)), hoverAlways: !showTitle,
                    action: { Coordinator.shared.clickTask(t) }) {
-                TabIcon(image: IconCache.icon(for: t.app)).dockBadge(isFirstTab(t) ? AppName.key(t.app) : nil)
+                TabIcon(image: IconCache.icon(for: t.app)).dockBadge(first ? key : nil, inBar: true, wide: showTitle)
                 if showTitle {
-                    Text(t.title)
+                    Text(Self.title(t.title, progress: progress, hung: hung))
                         .font(.system(size: 12, weight: t.isActive ? .semibold : .regular))
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -263,6 +273,13 @@ struct BarItemView: View {
             .dropDestination(for: URL.self) { urls, _ in Coordinator.shared.drop(urls, onto: t.app.bundleURL) }
             .contextMenu { RunningAppMenu(app: t.app, window: t.window) }
         }
+    }
+
+    /// „14 % · Downloads“ bzw. „Reagiert nicht · Xcode“.
+    static func title(_ title: String, progress: Double?, hung: Bool) -> String {
+        if hung { return "Reagiert nicht · \(title)" }
+        if let progress { return "\(Int((progress * 100).rounded())) % · \(title)" }
+        return title
     }
 
     private func isFirstTab(_ t: TaskItem) -> Bool {
@@ -286,6 +303,14 @@ struct BarTab<Label: View>: View {
     var active = false
     var dimmed = false
     var launching = false
+    var hung = false
+    var attention = false
+    /// Download-/Kopier-Fortschritt der App (0…1) – füllt den Tab von links.
+    var progress: Double? = nil
+    /// Bundle-ID für die Titelposition eines Players (grüner Balken).
+    var mediaKey: String? = nil
+    /// Großes Badge rechts im Tab (nur bei Tabs mit Titel).
+    var badge: String? = nil
     let hover: HoverTarget
     var hoverAlways = true
     let action: () -> Void
@@ -293,18 +318,49 @@ struct BarTab<Label: View>: View {
     @Environment(\.dockTheme) private var theme
 
     @State private var hovering = false
-    @State private var pulse = false
+    @State private var blink = false
 
     var body: some View {
         let compact = width <= 40
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
         Button(action: action) {
-            HStack(spacing: 7) { label }
+            HStack(spacing: 7) {
+                label
+                if let badge, !compact {
+                    Spacer(minLength: 0)
+                    BigBadge(text: badge)
+                }
+            }
                 .padding(.horizontal, compact ? 0 : 10)
                 .frame(width: width, height: height, alignment: compact ? .center : .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.primary.opacity(active ? 0.15 : (hovering ? 0.09 : (filled ? 0.045 : 0))))
+                    ZStack(alignment: .leading) {
+                        shape.fill(Color.primary.opacity(active ? 0.15 : (hovering ? 0.09 : (filled ? 0.045 : 0))))
+                        if let progress {
+                            Rectangle().fill(theme.accent.opacity(0.2))
+                                .frame(width: width * progress)
+                                .animation(.easeOut(duration: 0.3), value: progress)
+                        }
+                        if launching || hung { StatusStripes(hung: hung) }
+                        shape.fill(theme.accent.opacity(blink ? 0.4 : 0))
+                    }
+                    .clipShape(shape)
                 )
+                .overlay(alignment: .bottom) {
+                    // Fortschritt (Akzent) bzw. Titelposition (grün) als Balken am Fuß des Tabs.
+                    Group {
+                        if let progress {
+                            GeometryReader { g in
+                                Capsule().fill(theme.accent).frame(width: max(3, g.size.width * progress))
+                            }
+                            .frame(height: 3)
+                        } else if let mediaKey {
+                            MediaProgressBar(bundleID: mediaKey)
+                        }
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 1.5)
+                }
                 .overlay(alignment: .bottom) {
                     Capsule()
                         .fill(theme.accent)
@@ -312,7 +368,7 @@ struct BarTab<Label: View>: View {
                         .shadow(color: theme.accent.opacity(0.6), radius: 4)
                         .padding(.bottom, 1)
                 }
-                .opacity(dimmed ? 0.5 : (launching && pulse ? 0.45 : 1))
+                .opacity(dimmed ? 0.5 : 1)
                 .contentShape(Rectangle())
         }
         .buttonStyle(DockPressStyle())
@@ -322,12 +378,9 @@ struct BarTab<Label: View>: View {
             guard wantsPopup else { return }
             h ? Coordinator.shared.hoverBegan(hover, rect: rect) : Coordinator.shared.hoverEnded()
         }
-        .onChange(of: launching, initial: true) { _, on in
-            if on {
-                withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) { pulse = true }
-            } else {
-                withAnimation(.easeOut(duration: 0.2)) { pulse = false }
-            }
+        // Aufmerksamkeit: die ganze Kachel blinkt ein paar Mal.
+        .onChange(of: attention) { _, now in
+            withAnimation(.easeInOut(duration: 0.3).repeatCount(now ? 7 : 1, autoreverses: true)) { blink = now }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: active)
     }
@@ -446,7 +499,6 @@ struct DockIcon<Icon: View>: View {
 
     @Environment(\.dockEdge) private var edge
     @State private var hovering = false
-    @State private var pulse = false
 
     init(size: CGFloat, state: RunState, hover: HoverTarget, action: @escaping () -> Void, @ViewBuilder icon: () -> Icon) {
         self.icon = icon()
@@ -463,7 +515,6 @@ struct DockIcon<Icon: View>: View {
                 .frame(width: size, height: size)
                 .shadow(color: .black.opacity(0.18), radius: 2, y: 1)
                 .offset(hoverLift)
-                .opacity(state == .launching && pulse ? 0.45 : 1)
                 .padding(4)
                 .background(
                     RoundedRectangle(cornerRadius: size * 0.34, style: .continuous)
@@ -478,13 +529,6 @@ struct DockIcon<Icon: View>: View {
         .onHoverAlways { h, rect in
             withAnimation(.spring(response: 0.26, dampingFraction: 0.7)) { hovering = h }
             h ? Coordinator.shared.hoverBegan(hover, rect: rect) : Coordinator.shared.hoverEnded()
-        }
-        .onChange(of: state == .launching, initial: true) { _, launching in
-            if launching {
-                withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) { pulse = true }
-            } else {
-                withAnimation(.easeOut(duration: 0.2)) { pulse = false }
-            }
         }
     }
 }
@@ -618,11 +662,16 @@ struct FolderTile: View {
 
 extension View {
     /// Badge, Fortschrittsbalken und kurzes Aufleuchten bei neuen Mitteilungen.
-    func dockBadge(_ key: String?) -> some View { modifier(DockStatusModifier(key: key)) }
+    /// In der Leiste zeichnet der Tab Fortschritt, Streifen und Blinken selbst; das große Badge steht im breiten Tab.
+    func dockBadge(_ key: String?, inBar: Bool = false, wide: Bool = false) -> some View {
+        modifier(DockStatusModifier(key: key, inBar: inBar, wide: wide))
+    }
 }
 
 struct DockStatusModifier: ViewModifier {
     let key: String?
+    var inBar = false
+    var wide = false
     @ObservedObject var running = RunningAppsModel.shared
     @ObservedObject var store = DockStore.shared
     @ObservedObject var activity = ActivityModel.shared
@@ -631,12 +680,24 @@ struct DockStatusModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         let on = store.settings.showBadges
-        let wantsAttention = on && key.map { running.attention.contains($0) } == true
+        let wantsAttention = !inBar && on && key.map { running.attention.contains($0) } == true
+        let hung = key.map(running.isHung) ?? false
+        let launching = key.map(running.isLaunching) ?? false
         content
             .shadow(color: theme.accent.opacity(flash ? 0.95 : 0), radius: 7)
             .scaleEffect(flash ? 1.08 : 1)
+            .overlay {
+                if !inBar, hung || launching {
+                    StatusStripes(hung: hung).clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
             .overlay(alignment: .bottom) {
-                if on, let key, let p = running.progress[key] {
+                if !inBar, let key, running.progress[key] == nil {
+                    MediaProgressBar(bundleID: key).padding(.horizontal, 6).offset(y: -1)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if !inBar, on, let key, let p = running.progress[key] {
                     GeometryReader { g in
                         ZStack(alignment: .leading) {
                             Capsule().fill(.black.opacity(0.45))
@@ -651,7 +712,7 @@ struct DockStatusModifier: ViewModifier {
                     .accessibilityLabel("Fortschritt \(Int(p * 100)) Prozent")
                 }
             }
-            .overlay(alignment: .topTrailing) { DockBadge(key: key) }
+            .overlay(alignment: .topTrailing) { if !wide { DockBadge(key: key) } }
             .overlay(alignment: .bottom) {
                 if activity.visible, let key, let app = running.app(forKey: key),
                    let stat = activity.stats[app.processIdentifier] {
@@ -673,6 +734,47 @@ struct DockStatusModifier: ViewModifier {
             .onChange(of: wantsAttention) { _, now in
                 withAnimation(.easeInOut(duration: 0.3).repeatCount(now ? 5 : 1, autoreverses: true)) { flash = now }
             }
+    }
+}
+
+/// Großes rotes Badge rechts in einem breiten Leisten-Tab.
+struct BigBadge: View {
+    let text: String
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11.5, weight: .bold))
+            .monospacedDigit()
+            .foregroundStyle(.white)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .frame(minWidth: 20, minHeight: 20)
+            .background(Capsule().fill(Color.red))
+            .shadow(color: .black.opacity(0.2), radius: 1.5, y: 0.5)
+            .transition(.scale.combined(with: .opacity))
+            .accessibilityLabel("\(text) Mitteilungen")
+    }
+}
+
+/// Diagonale Streifen: wandernd, solange eine App startet; still und rötlich, wenn sie nicht reagiert.
+struct StatusStripes: View {
+    let hung: Bool
+    var body: some View {
+        TimelineView(.animation(paused: hung)) { ctx in
+            Canvas { g, size in
+                let spacing: CGFloat = 11
+                let shift = hung ? 0 : CGFloat(ctx.date.timeIntervalSinceReferenceDate * 16).truncatingRemainder(dividingBy: spacing)
+                var path = Path()
+                var x = -size.height - spacing + shift
+                while x < size.width + spacing {
+                    path.move(to: CGPoint(x: x, y: size.height))
+                    path.addLine(to: CGPoint(x: x + size.height, y: 0))
+                    x += spacing
+                }
+                g.stroke(path, with: .color(hung ? Color.red.opacity(0.4) : Color.primary.opacity(0.14)), lineWidth: 4)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityLabel(hung ? "Reagiert nicht" : "Wird gestartet")
     }
 }
 

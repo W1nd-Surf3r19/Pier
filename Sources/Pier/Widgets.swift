@@ -13,6 +13,53 @@ struct NowPlaying: Equatable {
     var artist: String
     var isPlaying: Bool
     var playerBundleID: String
+    /// Länge und Position in Sekunden; die Position galt zum Zeitpunkt `positionDate`.
+    var duration: Double?
+    var position: Double?
+    var positionDate = Date()
+
+    /// Anteil 0…1 – beim Abspielen läuft die Position seit `positionDate` weiter.
+    func fraction(at now: Date) -> Double? {
+        guard let duration, duration > 0, let position else { return nil }
+        let p = position + (isPlaying ? now.timeIntervalSince(positionDate) : 0)
+        return min(max(p / duration, 0), 1)
+    }
+
+    /// Position auf „jetzt“ festschreiben, z. B. vor Pause oder wenn die Quelle keine neue liefert.
+    mutating func rebase(at now: Date) {
+        if let duration, let f = fraction(at: now) { position = f * duration }
+        positionDate = now
+    }
+}
+
+/// AppleScript über osascript im Hintergrund – nur an laufende Apps, sonst würde AppleScript sie starten.
+enum PlayerScript {
+    static func run(_ bundleID: String, _ source: String, done: @escaping @MainActor (String?) -> Void) {
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty else {
+            Task { @MainActor in done(nil) }
+            return
+        }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        p.arguments = ["-e", source]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = FileHandle.nullDevice
+        p.terminationHandler = { proc in
+            let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let ok = proc.terminationStatus == 0
+            Task { @MainActor in done(ok ? out : nil) }
+        }
+        do { try p.run() } catch { Task { @MainActor in done(nil) } }
+    }
+
+    /// „Titel|Position|Länge“ – der Titel darf selbst „|“ enthalten, die Zahlen stehen hinten.
+    nonisolated static func parse(_ text: String) -> (title: String, position: Double, duration: Double)? {
+        let parts = text.components(separatedBy: "|")
+        guard parts.count >= 3, let pos = Double(parts[parts.count - 2]), let dur = Double(parts[parts.count - 1]) else { return nil }
+        return (parts.dropLast(2).joined(separator: "|"), pos, dur)
+    }
 }
 
 @MainActor
@@ -23,6 +70,9 @@ final class WidgetModel: ObservableObject {
     @Published private(set) var nowPlaying: NowPlaying?
 
     private var timer: Timer?
+    private var mediaTimer: Timer?
+    private var scriptRunning = false
+    static let music = "com.apple.Music", vlc = "org.videolan.vlc"
 
     private init() {
         updateBattery()
@@ -38,6 +88,50 @@ final class WidgetModel: ObservableObject {
                 MainActor.assumeIsolated { self?.handlePlayer(info, bundleID: bundleID) }
             }
         }
+        // Position nachführen: Music meldet sie nicht, VLC meldet gar nichts. Dazwischen rechnet die Ansicht selbst.
+        mediaTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.syncMedia() }
+        }
+    }
+
+    // Millisekunden als Ganzzahl – „as text“ einer Kommazahl hängt vom Gebietsschema ab.
+    private static let musicScript = """
+        tell application id "com.apple.Music" to if player state is not stopped then \
+        return name of current track & "|" & ((player position * 1000) as integer) & "|" & ((duration of current track * 1000) as integer)
+        """
+    private static let vlcScript = """
+        tell application id "org.videolan.vlc" to if playing then \
+        return name of current item & "|" & (current time) & "|" & (duration of current item)
+        """
+
+    private func syncMedia() {
+        guard !scriptRunning else { return }
+        if nowPlaying?.playerBundleID == Self.music, nowPlaying?.isPlaying == true {
+            scriptRunning = true
+            PlayerScript.run(Self.music, Self.musicScript) { [weak self] out in
+                guard let self else { return }
+                self.scriptRunning = false
+                guard let out, let r = PlayerScript.parse(out), self.nowPlaying?.playerBundleID == Self.music else { return }
+                self.nowPlaying?.position = r.position / 1000
+                self.nowPlaying?.duration = r.duration / 1000
+                self.nowPlaying?.positionDate = Date()
+            }
+        } else if !NSRunningApplication.runningApplications(withBundleIdentifier: Self.vlc).isEmpty {
+            scriptRunning = true
+            PlayerScript.run(Self.vlc, Self.vlcScript) { [weak self] out in
+                guard let self else { return }
+                self.scriptRunning = false
+                if let out, let r = PlayerScript.parse(out) {
+                    self.nowPlaying = NowPlaying(title: r.title, artist: "", isPlaying: true, playerBundleID: Self.vlc,
+                                                 duration: r.duration, position: r.position)
+                } else if self.nowPlaying?.playerBundleID == Self.vlc, self.nowPlaying?.isPlaying == true {
+                    self.nowPlaying?.rebase(at: Date())
+                    self.nowPlaying?.isPlaying = false
+                }
+            }
+        } else if nowPlaying?.playerBundleID == Self.vlc {
+            nowPlaying = nil
+        }
     }
 
     private func handlePlayer(_ info: [AnyHashable: Any], bundleID: String) {
@@ -46,10 +140,20 @@ final class WidgetModel: ObservableObject {
             if nowPlaying?.playerBundleID == bundleID { nowPlaying = nil }
             return
         }
-        nowPlaying = NowPlaying(title: info["Name"] as? String ?? "Unbekannt",
-                                artist: info["Artist"] as? String ?? "",
-                                isPlaying: state == "Playing",
-                                playerBundleID: bundleID)
+        let ms = (info["Total Time"] ?? info["Duration"]) as? NSNumber
+        var np = NowPlaying(title: info["Name"] as? String ?? "Unbekannt",
+                            artist: info["Artist"] as? String ?? "",
+                            isPlaying: state == "Playing",
+                            playerBundleID: bundleID,
+                            duration: ms.map { $0.doubleValue / 1000 },
+                            position: (info["Playback Position"] as? NSNumber)?.doubleValue)
+        // Music liefert keine Position: beim selben Titel weiterrechnen (Pause/Fortsetzen), dann nachfragen.
+        if np.position == nil, var old = nowPlaying, old.playerBundleID == bundleID, old.title == np.title {
+            old.rebase(at: np.positionDate)
+            np.position = old.position
+        }
+        nowPlaying = np
+        if bundleID == Self.music { syncMedia() }
     }
 
     func updateBattery() {
@@ -76,6 +180,7 @@ final class WidgetModel: ObservableObject {
 
     func playPause() {
         MediaKeys.send(16)
+        nowPlaying?.rebase(at: Date())
         nowPlaying?.isPlaying.toggle()
     }
 
@@ -192,6 +297,7 @@ struct NowPlayingWidget: View {
                 }
                 .lineLimit(1)
                 .dockTextShadow()
+                .overlay(alignment: .bottom) { MediaProgressBar(bundleID: nil).offset(y: 5) }
                 .frame(maxWidth: compact ? 110 : 160, alignment: .leading)
                 .fixedSize(horizontal: true, vertical: false)
                 .contentShape(Rectangle())
@@ -206,6 +312,29 @@ struct NowPlayingWidget: View {
                 }
             }
             .help(np.artist.isEmpty ? np.title : "\(np.title) – \(np.artist)")
+        }
+    }
+}
+
+/// Titelposition eines Players als dünner grüner Balken. `bundleID` nil = was gerade spielt.
+struct MediaProgressBar: View {
+    var bundleID: String?
+    @ObservedObject var model = WidgetModel.shared
+
+    var body: some View {
+        if let np = model.nowPlaying, bundleID == nil || np.playerBundleID == bundleID, np.fraction(at: Date()) != nil {
+            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                let f = np.fraction(at: ctx.date) ?? 0
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.primary.opacity(0.15))
+                        Capsule().fill(Color.green).frame(width: max(3, g.size.width * f))
+                    }
+                }
+            }
+            .frame(height: 3)
+            .allowsHitTesting(false)
+            .accessibilityLabel("Titelposition")
         }
     }
 }

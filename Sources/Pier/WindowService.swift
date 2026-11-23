@@ -22,19 +22,27 @@ struct WindowRef: Identifiable, Equatable, @unchecked Sendable {
 }
 
 enum WindowService {
-    static func windows(for pids: [pid_t]) -> [pid_t: [WindowRef]] {
+    /// Fenster aller Apps; `unresponsive` = Apps, die nicht rechtzeitig geantwortet haben.
+    static func windows(for pids: [pid_t]) -> (windows: [pid_t: [WindowRef]], unresponsive: Set<pid_t>) {
         var result: [pid_t: [WindowRef]] = [:]
+        var unresponsive = Set<pid_t>()
         for pid in pids {
-            let w = windows(pid: pid)
+            guard let w = scan(pid: pid) else { unresponsive.insert(pid); continue }
             if !w.isEmpty { result[pid] = w }
         }
-        return result
+        return (result, unresponsive)
     }
 
-    static func windows(pid: pid_t) -> [WindowRef] {
+    static func windows(pid: pid_t) -> [WindowRef] { scan(pid: pid) ?? [] }
+
+    /// nil = die App hat nicht innerhalb des Zeitlimits geantwortet (hängt oder ist gerade sehr beschäftigt).
+    private static func scan(pid: pid_t) -> [WindowRef]? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.25)
-        guard let wins: [AXUIElement] = attr(app, kAXWindowsAttribute) else { return [] }
+        var value: CFTypeRef?
+        let err = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value)
+        if err == .cannotComplete { return nil }
+        guard err == .success, let wins = value as? [AXUIElement] else { return [] }
         let focused: AXUIElement? = attr(app, kAXFocusedWindowAttribute)
 
         return wins.compactMap { w in

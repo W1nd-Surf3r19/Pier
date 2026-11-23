@@ -181,3 +181,39 @@ private func allAppKeys(_ entries: [DockEntry]) -> [String] {
     #expect(!TabRow.showsTitle(.iconAndText, widthPerTab: 40)) // kein Platz für Text neben dem Icon
     #expect(try JSONDecoder().decode(DockSettings.self, from: Data("{}".utf8)).barLabels == .automatic)
 }
+
+@Test func appCountsAsHungOnlyAfterRepeatedTimeouts() {
+    var f: [pid_t: Int] = [:]
+    var hung = Set<pid_t>()
+    for _ in 0..<3 { (f, hung) = RunningAppsModel.updateHung(failures: f, unresponsive: [42]) }
+    #expect(hung.isEmpty) // drei Aussetzer: noch nicht
+    (f, hung) = RunningAppsModel.updateHung(failures: f, unresponsive: [42])
+    #expect(hung == [42])
+    (f, hung) = RunningAppsModel.updateHung(failures: f, unresponsive: []) // antwortet wieder
+    #expect(hung.isEmpty && f.isEmpty)
+}
+
+@Test func mediaPositionRunsOnWhilePlaying() {
+    let t0 = Date(timeIntervalSince1970: 1_000)
+    var np = NowPlaying(title: "Song", artist: "", isPlaying: true, playerBundleID: "x",
+                        duration: 200, position: 50, positionDate: t0)
+    #expect(np.fraction(at: t0) == 0.25)
+    #expect(np.fraction(at: t0.addingTimeInterval(50)) == 0.5)
+    #expect(np.fraction(at: t0.addingTimeInterval(500)) == 1) // nie über 100 %
+    np.rebase(at: t0.addingTimeInterval(50)); np.isPlaying = false // Pause
+    #expect(np.fraction(at: t0.addingTimeInterval(400)) == 0.5)
+    #expect(NowPlaying(title: "", artist: "", isPlaying: true, playerBundleID: "x").fraction(at: t0) == nil)
+}
+
+@Test func playerScriptOutputKeepsPipesInTitle() {
+    let r = PlayerScript.parse("A | B|61000|200000")
+    #expect(r?.title == "A | B" && r?.position == 61000 && r?.duration == 200000)
+    #expect(PlayerScript.parse("") == nil)
+    #expect(PlayerScript.parse("Titel|x|3") == nil)
+}
+
+@MainActor @Test func barTabTitleShowsProgressAndHung() {
+    #expect(BarItemView.title("Downloads", progress: 0.14, hung: false) == "14 % · Downloads")
+    #expect(BarItemView.title("Xcode", progress: 0.5, hung: true) == "Reagiert nicht · Xcode")
+    #expect(BarItemView.title("Mail", progress: nil, hung: false) == "Mail")
+}

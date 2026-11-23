@@ -203,11 +203,11 @@ struct PreviewView: View {
         case .app(let key, let name):
             let wins = store.settings.windowPreviews ? running.windows(forKey: key) : []
             if wins.isEmpty {
-                NameLabel(text: name)
+                NameLabel(text: running.label(name, key: key))
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Text(name).font(.system(size: 12, weight: .semibold))
+                        Text(running.label(name, key: key)).font(.system(size: 12, weight: .semibold))
                         Spacer(minLength: 16)
                         Text(wins.count == 1 ? "1 Fenster" : "\(wins.count) Fenster")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
