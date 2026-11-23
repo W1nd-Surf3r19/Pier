@@ -136,22 +136,51 @@ struct BarDockView: View {
 
     var body: some View {
         let plain = items(grouped: false)
-        // Spielt Musik und hat der Player einen Tab, zeigt der Tab sie – das Widget rechts entfällt.
-        let strip = WidgetStrip(settings: settings, compact: false, hideNowPlaying: plain.contains(where: \.isMedia))
-        let height = DockMetrics.barHeight(settings) - 12
+        let grouped = settings.windowGrouping == .never ? nil : items(grouped: true)
+        let edge = settings.effectiveEdge
+        // Spielt Musik und hat der Player einen Tab, zeigt der Tab sie – das Widget entfällt.
+        let strip = WidgetStrip(settings: settings, compact: edge.isVertical, vertical: edge.isVertical,
+                                hideNowPlaying: plain.contains(where: \.isMedia),
+                                narrow: edge.isVertical && settings.barLabels == .iconsOnly)
+        let tab = DockMetrics.barTabHeight(settings)
 
-        HStack(spacing: 0) {
-            TabRow(items: plain, groupedItems: settings.windowGrouping == .never ? nil : items(grouped: true),
-                   grouping: settings.windowGrouping,
-                   height: height, labels: settings.barLabels)
-                .padding(.leading, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            if strip.hasContent {
-                strip.padding(.horizontal, 16)
+        Group {
+            if edge.isVertical {
+                // Seitlich: eine Spalte voller Tabs, Widgets unten.
+                VStack(spacing: 0) {
+                    TabColumn(items: plain, groupedItems: grouped, grouping: settings.windowGrouping,
+                              width: DockMetrics.barWidth(settings) - 12, tabHeight: tab,
+                              showTitles: settings.barLabels != .iconsOnly)
+                        .padding(.vertical, 8)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                    if strip.hasContent {
+                        strip.padding(.vertical, 12)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                HStack(spacing: 0) {
+                    TabRow(items: plain, groupedItems: grouped, grouping: settings.windowGrouping,
+                           height: tab, labels: settings.barLabels, rows: DockMetrics.barRows(settings))
+                        .padding(.leading, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if strip.hasContent {
+                        strip.padding(.horizontal, 16)
+                    }
+                }
+                .padding(.top, 1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Am Innenrand ziehen ändert die Zahl der Zeilen.
+                .overlay(alignment: edge == .top ? .bottom : .top) {
+                    BarResizeHandle(edge: edge, rows: settings.barRows,
+                                    step: tab + DockMetrics.barRowSpacing) { rows, done in
+                        Coordinator.shared.resizeBar(rows: rows, done: done)
+                    }
+                    .frame(height: 5)
+                    .accessibilityLabel("Zeilen der Leiste ändern")
+                }
             }
         }
-        .padding(.top, 1)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
     }
 
@@ -184,7 +213,9 @@ struct BarDockView: View {
                 result += running.tasks(for: app, grouped: grouped).map(BarItem.task)
             }
         }
-        if settings.showNowPlaying, let player = widgets.nowPlaying?.playerBundleID,
+        // Schmale seitliche Leiste („Nur Icons“): kein Platz für den Musik-Tab – dann bleibt das Widget.
+        let narrow = settings.effectiveEdge.isVertical && settings.barLabels == .iconsOnly
+        if settings.showNowPlaying, !narrow, let player = widgets.nowPlaying?.playerBundleID,
            let i = result.firstIndex(where: { if case .task(let t) = $0 { AppName.key(t.app) == player } else { false } }),
            case .task(var t) = result[i] {
             t.media = true
@@ -201,6 +232,8 @@ struct TabRow: View {
     var grouping: WindowGrouping = .never
     let height: CGFloat
     var labels: BarLabels = .automatic
+    /// Zeilen (1…5); die Tabs verteilen sich der Reihe nach gleichmäßig.
+    var rows = 1
     static let compactWidth: CGFloat = 40
     static let mediaWidth: CGFloat = 250
     static let separatorWidth: CGFloat = 9
@@ -228,25 +261,47 @@ struct TabRow: View {
         }
     }
 
+    /// Teilt die Tabs der Reihe nach auf höchstens `rows` Zeilen auf (vordere Zeilen bekommen den Rest).
+    static func split(_ items: [BarItem], rows: Int) -> [[BarItem]] {
+        guard rows > 1, items.count > 1 else { return [items] }
+        let n = Int((Double(items.count) / Double(rows)).rounded(.up))
+        return stride(from: 0, to: items.count, by: n).map { Array(items[$0..<min($0 + n, items.count)]) }
+    }
+
+    static func trimSeparators(_ line: [BarItem]) -> [BarItem] {
+        Array(line.drop(while: \.isSeparator).reversed().drop(while: \.isSeparator).reversed())
+    }
+
+    /// Schmalste Tab-Breite über alle Zeilen – alle Zeilen zeigen damit gleich breite Tabs.
+    static func widthPerTab(_ items: [BarItem], rows: Int, width: CGFloat) -> CGFloat {
+        split(items, rows: rows).map { widthPerTab($0, width: width) }.min() ?? 0
+    }
+
     var body: some View {
         GeometryReader { geo in
             let items = groupedItems.map { g in
-                Self.useGrouped(grouping, widthPerTab: Self.widthPerTab(self.items, width: geo.size.width)) ? g : self.items
+                Self.useGrouped(grouping, widthPerTab: Self.widthPerTab(self.items, rows: rows, width: geo.size.width)) ? g : self.items
             } ?? self.items
-            let per = Self.widthPerTab(items, width: geo.size.width)
+            let per = Self.widthPerTab(items, rows: rows, width: geo.size.width)
             let showTitle = TabRow.showsTitle(labels, widthPerTab: per)
-            HStack(spacing: spacing) {
-                ForEach(items) { item in
-                    BarItemView(item: item, height: height,
-                                width: item.isSeparator ? separatorWidth
-                                    : item.isMedia ? Self.mediaWidth
-                                    : (item.isCompact || !showTitle ? Self.compactWidth : min(210, per)),
-                                showTitle: item.isMedia || (!item.isCompact && showTitle))
+            // Trennlinien am Anfang oder Ende einer Zeile trennen nichts – weglassen.
+            let lines = Self.split(items, rows: rows).map(Self.trimSeparators)
+            VStack(alignment: .leading, spacing: DockMetrics.barRowSpacing) {
+                ForEach(lines.indices, id: \.self) { i in
+                    HStack(spacing: spacing) {
+                        ForEach(lines[i]) { item in
+                            BarItemView(item: item, height: height,
+                                        width: item.isSeparator ? separatorWidth
+                                            : item.isMedia ? Self.mediaWidth
+                                            : (item.isCompact || !showTitle ? Self.compactWidth : min(210, per)),
+                                        showTitle: item.isMedia || (!item.isCompact && showTitle))
+                        }
+                    }
                 }
             }
             .frame(maxHeight: .infinity)
         }
-        .frame(height: height)
+        .frame(height: CGFloat(rows) * height + CGFloat(rows - 1) * DockMetrics.barRowSpacing)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: items.map(\.id))
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: groupedItems?.map(\.id))
     }
@@ -261,6 +316,45 @@ struct TabRow: View {
     }
 }
 
+/// Seitliche Leiste: Tabs untereinander, so hoch wie möglich, aber alle passen hinein (kein Scrollen –
+/// Scrollen über einem Tab wechselt Fenster).
+struct TabColumn: View {
+    let items: [BarItem]
+    var groupedItems: [BarItem]?
+    var grouping: WindowGrouping
+    let width: CGFloat
+    let tabHeight: CGFloat
+    let showTitles: Bool
+    private let spacing: CGFloat = 3
+
+    /// Höhe je Tab, damit `items` in `height` passen (Trennlinien 9 pt), höchstens `tabHeight`, mindestens 16.
+    static func fittedHeight(_ items: [BarItem], height: CGFloat, tabHeight: CGFloat, spacing: CGFloat = 3) -> CGFloat {
+        let seps = CGFloat(items.filter(\.isSeparator).count)
+        let tabs = CGFloat(items.count) - seps
+        guard tabs > 0 else { return tabHeight }
+        let free = height - seps * 9 - spacing * CGFloat(max(items.count - 1, 0))
+        return min(tabHeight, max(16, (free / tabs).rounded(.down)))
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let natural = Self.fittedHeight(items, height: geo.size.height, tabHeight: tabHeight)
+            // „Automatisch“ gruppiert, sobald die Tabs sonst schrumpfen müssten.
+            let useGrouped = groupedItems != nil && (grouping == .always || (grouping == .automatic && natural < tabHeight))
+            let list = useGrouped ? groupedItems! : items
+            let h = Self.fittedHeight(list, height: geo.size.height, tabHeight: tabHeight)
+            VStack(spacing: spacing) {
+                ForEach(list) { item in
+                    BarItemView(item: item, height: item.isSeparator ? 9 : h, width: width,
+                                showTitle: showTitles && !item.isSeparator)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: items.map(\.id))
+    }
+}
+
 struct BarItemView: View {
     let item: BarItem
     let height: CGFloat
@@ -270,7 +364,15 @@ struct BarItemView: View {
     @ObservedObject var store = DockStore.shared
     @ObservedObject var widgets = WidgetModel.shared
     @Environment(\.dockTheme) private var theme
+    @Environment(\.dockEdge) private var edge
     @State private var anchor: CGRect = .zero
+
+    /// Name neben dem Icon – nur in der seitlichen Leiste mit Titeln (oben/unten sind diese Tabs kompakt).
+    @ViewBuilder private func sideTitle(_ name: String) -> some View {
+        if showTitle {
+            Text(name).font(.system(size: 12)).lineLimit(1).truncationMode(.tail).dockTextShadow()
+        }
+    }
 
     var body: some View {
         switch item {
@@ -280,12 +382,15 @@ struct BarItemView: View {
                 Image(systemName: "square.grid.2x2.fill")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(Color.primary.opacity(0.85))
+                    .frame(width: 20)
+                sideTitle("Apps")
             }
         case .pinned(let a):
             BarTab(height: height, width: width, filled: false,
                    launching: running.isLaunching(a.key), hover: .label(running.label(a.name, key: a.key)),
                    action: { Coordinator.shared.clickApp(key: a.key, url: a.url) }) {
                 TabIcon(image: IconCache.icon(forPath: a.path)).dockBadge(a.key, inBar: true)
+                sideTitle(a.name)
             }
             .dropDestination(for: URL.self) { urls, _ in Coordinator.shared.drop(urls, onto: a.url) }
             .contextMenu { PinnedAppMenu(app: a) }
@@ -295,14 +400,21 @@ struct BarItemView: View {
                 Image(systemName: "folder.fill")
                     .font(.system(size: 15))
                     .foregroundStyle(theme.accent)
+                    .frame(width: 20)
+                sideTitle(f.name)
             }
             .onHoverAlways { h, r in if h { anchor = r } }
         case .separator:
-            DockDivider(height: height * 0.5).frame(width: width, height: height)
+            if edge.isVertical {
+                DockDivider(height: width * 0.6, horizontal: true).frame(width: width, height: height)
+            } else {
+                DockDivider(height: height * 0.5).frame(width: width, height: height)
+            }
         case .stack(let s):
             BarTab(height: height, width: width, filled: false, hover: .label(s.name),
                    action: { Coordinator.shared.toggleStack(s, anchor: anchor) }) {
                 TabIcon(image: IconCache.icon(forPath: s.path))
+                sideTitle(s.name)
             }
             .onHoverAlways { h, r in if h { anchor = r } }
             .contextMenu { StackMenu(stack: s) }
@@ -310,6 +422,7 @@ struct BarItemView: View {
             BarTab(height: height, width: width, filled: false, hover: .label(f.name),
                    action: { Coordinator.shared.openFile(f) }) {
                 TabIcon(image: IconCache.icon(forPath: f.path))
+                sideTitle(f.name)
             }
             .contextMenu { FileMenu(file: f) }
         case .task(let t):

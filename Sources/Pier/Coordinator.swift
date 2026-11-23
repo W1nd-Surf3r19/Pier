@@ -170,6 +170,15 @@ final class Coordinator {
         popup?.hide()
     }
 
+    /// Während am Griff gezogen wird, nur die Leiste anpassen; Fenster erst beim Loslassen (fitAll ist teuer).
+    private var resizingBar = false
+
+    func resizeBar(rows: Int, done: Bool) {
+        resizingBar = !done
+        if store.settings.barRows != rows { store.settings.barRows = rows }
+        if done { updateWindowFitter() }
+    }
+
     func dockMoved(_ w: NSWindow) {
         docks.first { $0.panel === w }?.movedByUser()
     }
@@ -187,17 +196,15 @@ final class Coordinator {
             ?? dock
     }
 
-    /// Freizuhaltende Höhe = Oberkante des Docks (+ kleiner Abstand bei der Pille), auf jedem Bildschirm mit Dock.
-    /// Nur für Docks am unteren Rand.
+    /// Freizuhaltender Streifen = wie weit das Dock (+ kleiner Abstand bei der Pille) in jeden Bildschirm mit Dock ragt.
+    /// Die Leiste an jeder Kante, die Pille nur unten (sonst schrumpften plötzlich Fenster bei seitlicher Pille).
     func updateWindowFitter() {
-        guard let s = current, let screen = dock.screen else { return }
+        guard let s = current, !resizingBar else { return }
         var reserved: CGFloat = 0
-        if s.fitWindows && !s.autoHide && s.effectiveEdge == .bottom && !s.isFree {
-            reserved = s.style == .bar
-                ? DockMetrics.barHeight(s)
-                : dock.panel.frame.maxY - screen.frame.minY + DockMetrics.pillBottomGap
+        if s.fitWindows && !s.autoHide && !s.isFree && (s.style == .bar || s.effectiveEdge == .bottom) {
+            reserved = dock.reservedThickness
         }
-        WindowFitter.shared.update(reserved: reserved, screens: docks.compactMap { $0.screen?.frame },
+        WindowFitter.shared.update(reserved: reserved, edge: s.effectiveEdge, screens: docks.compactMap { $0.screen?.frame },
                                    pids: running.apps.map(\.processIdentifier))
     }
 

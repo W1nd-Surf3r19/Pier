@@ -285,6 +285,8 @@ struct DockSettings: Codable, Equatable {
     var freeOrigin: CGPoint?
     var runningOrder: RunningOrder = .launch
     var windowGrouping: WindowGrouping = .never
+    /// Zeilen der Leiste oben/unten (1…5), per Ziehen am Innenrand.
+    var barRows = 1
     var customColor = "#3478F6"
     var showSound = true
     var showDevices = true
@@ -299,8 +301,8 @@ struct DockSettings: Codable, Equatable {
 
     init() {}
 
-    /// Die Leiste gibt es nur unten (Hohlkehlen, Fenster-Anpassung); seitlich nur die Pille.
-    var effectiveEdge: DockEdge { style == .bar ? .bottom : edge }
+    /// Kante des Docks – Pille und Leiste können an alle vier.
+    var effectiveEdge: DockEdge { edge }
     /// Frei verschobene Pille: kein Ausblenden an der Kante, kein Freihalten für Fenster.
     var isFree: Bool { style == .pill && placement == .free }
 
@@ -340,6 +342,7 @@ struct DockSettings: Codable, Equatable {
         freeOrigin = v(.freeOrigin, d.freeOrigin)
         runningOrder = v(.runningOrder, d.runningOrder)
         windowGrouping = v(.windowGrouping, d.windowGrouping)
+        barRows = min(max(v(.barRows, d.barRows), 1), DockMetrics.maxBarRows)
         customColor = v(.customColor, d.customColor)
         showSound = v(.showSound, d.showSound)
         showDevices = v(.showDevices, d.showDevices)
@@ -369,6 +372,19 @@ enum DockMetrics {
     /// Hohlkehle, mit der die Leiste in die runden Ecken angedockter Fenster übergeht.
     static let filletRadius: CGFloat = 22
     static let barCornerRadius: CGFloat = 14
+    static let maxBarRows = 5
+    static let barRowSpacing: CGFloat = 4
     static func barIcon(_ s: DockSettings) -> CGFloat { max(22, (s.iconSize * 0.66).rounded()) }
-    static func barHeight(_ s: DockSettings) -> CGFloat { barIcon(s) + 18 }
+    /// Höhe eines Tabs (einer Zeile) der Leiste.
+    static func barTabHeight(_ s: DockSettings) -> CGFloat { barIcon(s) + 6 }
+    /// Mehrere Zeilen nur oben/unten; seitlich ist die Leiste eine Spalte.
+    static func barRows(_ s: DockSettings) -> Int { s.effectiveEdge.isVertical ? 1 : min(max(s.barRows, 1), maxBarRows) }
+    /// Breite der seitlichen Leiste: schmal bei „Nur Icons“, sonst mit Titeln.
+    static func barWidth(_ s: DockSettings) -> CGFloat { s.barLabels == .iconsOnly ? barIcon(s) + 18 : 210 }
+    /// Dicke der Leiste quer zu ihrer Kante (Höhe oben/unten, Breite seitlich).
+    static func barThickness(_ s: DockSettings) -> CGFloat {
+        if s.effectiveEdge.isVertical { return barWidth(s) }
+        let rows = CGFloat(barRows(s))
+        return rows * barTabHeight(s) + (rows - 1) * barRowSpacing + 12
+    }
 }

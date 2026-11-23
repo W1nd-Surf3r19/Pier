@@ -304,14 +304,17 @@ struct ClockWidget: View {
 
 struct BatteryWidget: View {
     var state: BatteryState
+    /// Prozent unter dem Symbol (schmale seitliche Leiste).
+    var stacked = false
     var body: some View {
-        HStack(spacing: 4) {
+        let layout = stacked ? AnyLayout(VStackLayout(spacing: 1)) : AnyLayout(HStackLayout(spacing: 4))
+        layout {
             Image(systemName: symbol)
                 .font(.system(size: 14, weight: .regular))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(isLow ? AnyShapeStyle(Color.red) : AnyShapeStyle(.primary))
             Text("\(state.level)%")
-                .font(.system(size: 11.5, weight: .medium).monospacedDigit())
+                .font(.system(size: stacked ? 10 : 11.5, weight: .medium).monospacedDigit())
                 .foregroundStyle(.secondary)
                 .dockTextShadow()
         }
@@ -408,6 +411,8 @@ struct WidgetStrip: View {
     var vertical = false
     /// Die Leiste zeigt die Musik im Tab des Players.
     var hideNowPlaying = false
+    /// Schmale seitliche Leiste: alles untereinander und knapp (Uhr ohne Datum, Musik nur als Taste).
+    var narrow = false
     @ObservedObject var model = WidgetModel.shared
     @ObservedObject var devices = DevicesModel.shared
 
@@ -422,7 +427,9 @@ struct WidgetStrip: View {
     var body: some View {
         let layout = vertical ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: compact ? 12 : 18))
         layout {
-            if settings.showNowPlaying && !hideNowPlaying { NowPlayingWidget(compact: compact) }
+            if settings.showNowPlaying && !hideNowPlaying {
+                if narrow { MediaControls(compact: true) } else { NowPlayingWidget(compact: compact) }
+            }
             if showsDevices {
                 WidgetButton(symbol: devices.volumes.isEmpty ? "externaldrive.connected.to.line.below" : "externaldrive.fill",
                              help: "Geräte") { Coordinator.shared.toggleDevices(anchor: $0) }
@@ -430,8 +437,8 @@ struct WidgetStrip: View {
             if settings.showSound {
                 WidgetButton(symbol: "speaker.wave.2.fill", help: "Ton-Ausgang und -Eingang") { Coordinator.shared.toggleSound(anchor: $0) }
             }
-            if settings.showBattery, let b = model.battery { BatteryWidget(state: b) }
-            if settings.showClock { ClockWidget(showDate: settings.showDate) }
+            if settings.showBattery, let b = model.battery { BatteryWidget(state: b, stacked: narrow) }
+            if settings.showClock { ClockWidget(showDate: settings.showDate && !narrow) }
         }
     }
 }
@@ -497,12 +504,15 @@ extension View {
 }
 
 /// Abspielen/Pause und Weiter – im breiten Tab des Players in der Leiste.
+/// `compact`: untereinander, für die schmale seitliche Leiste.
 struct MediaControls: View {
+    var compact = false
     @ObservedObject var model = WidgetModel.shared
 
     var body: some View {
         if let np = model.nowPlaying {
-            HStack(spacing: 4) {
+            let layout = compact ? AnyLayout(VStackLayout(spacing: 2)) : AnyLayout(HStackLayout(spacing: 4))
+            layout {
                 Button { model.playPause() } label: {
                     Image(systemName: np.isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 10, weight: .bold))
@@ -519,6 +529,7 @@ struct MediaControls: View {
                 .accessibilityLabel("Nächster Titel")
             }
             .buttonStyle(DockPressStyle())
+            .help(np.artist.isEmpty ? np.title : "\(np.title) – \(np.artist)")
         }
     }
 }

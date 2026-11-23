@@ -289,3 +289,73 @@ struct MoveHandle: NSViewRepresentable {
         }
     }
 }
+
+// MARK: Griff zum Ändern der Zeilenzahl der Leiste
+
+/// Dünner Streifen am Innenrand der Leiste: Ziehen ändert die Zahl der Zeilen in Stufen.
+/// Rechnet mit der absoluten Mausposition – das Panel ändert beim Ziehen seine Größe.
+struct BarResizeHandle: NSViewRepresentable {
+    let edge: DockEdge
+    let rows: Int
+    let step: CGFloat
+    /// (neue Zeilenzahl, Ziehen beendet)
+    var onChange: (Int, Bool) -> Void
+
+    func makeNSView(context: Context) -> HandleView { HandleView() }
+
+    func updateNSView(_ v: HandleView, context: Context) {
+        v.edge = edge
+        v.rows = rows
+        v.step = step
+        v.onChange = onChange
+    }
+
+    final class HandleView: NSView {
+        var edge = DockEdge.bottom
+        var rows = 1
+        var step: CGFloat = 30
+        var onChange: ((Int, Bool) -> Void)?
+        private var start: (mouseY: CGFloat, rows: Int)?
+        private var last = 0
+
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        // Cursor auch, wenn Pier nicht aktiv ist (resetCursorRects greift dann nicht).
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            trackingAreas.forEach(removeTrackingArea)
+            addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect, .cursorUpdate],
+                                           owner: self, userInfo: nil))
+        }
+        override func mouseEntered(with event: NSEvent) { NSCursor.resizeUpDown.set() }
+        override func cursorUpdate(with event: NSEvent) { NSCursor.resizeUpDown.set() }
+        override func mouseExited(with event: NSEvent) { if start == nil { NSCursor.arrow.set() } }
+
+        override func mouseDown(with event: NSEvent) {
+            start = (NSEvent.mouseLocation.y, rows)
+            last = rows
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let s = start else { return }
+            NSCursor.resizeUpDown.set()
+            let next = BarResizeHandle.rows(from: s.rows, drag: NSEvent.mouseLocation.y - s.mouseY, step: step, edge: edge)
+            if next != last {
+                last = next
+                onChange?(next, false)
+            }
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard start != nil else { return }
+            start = nil
+            onChange?(last, true)
+        }
+    }
+
+    /// Zeilen nach dem Ziehen: unten wächst die Leiste nach oben, oben nach unten; je `step` eine Zeile.
+    nonisolated static func rows(from start: Int, drag dy: CGFloat, step: CGFloat, edge: DockEdge) -> Int {
+        let toward = edge == .top ? -dy : dy
+        return min(max(start + Int((toward / step).rounded()), 1), DockMetrics.maxBarRows)
+    }
+}

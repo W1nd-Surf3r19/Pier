@@ -49,7 +49,28 @@ final class DockController {
 
     /// Sichtbare Oberkante des Docks (ohne den transparenten Streifen für die Hohlkehlen).
     var visibleTop: CGFloat {
-        settings.style == .bar ? panel.frame.minY + DockMetrics.barHeight(settings) : panel.frame.maxY
+        settings.style == .bar && settings.effectiveEdge == .bottom
+            ? panel.frame.minY + DockMetrics.barThickness(settings) : panel.frame.maxY
+    }
+
+    /// Wie weit das Dock von seiner Bildschirmkante in den Bildschirm ragt (für den WindowFitter).
+    var reservedThickness: CGFloat {
+        guard let sf = screen?.frame else { return 0 }
+        let f = panel.frame
+        let gap = settings.style == .pill ? DockMetrics.pillBottomGap : 0
+        switch settings.effectiveEdge {
+        case .bottom: return visibleTop - sf.minY + gap
+        case .top: return sf.maxY - f.minY + gap
+        case .left: return f.maxX - sf.minX + gap
+        case .right: return sf.maxX - f.minX + gap
+        }
+    }
+
+    /// Unten liegt die Leiste unten im Panel (darüber der Streifen für die Hohlkehlen), sonst füllt sie es.
+    private func barHostingFrame(_ size: CGSize) -> NSRect {
+        settings.effectiveEdge == .bottom
+            ? NSRect(x: 0, y: 0, width: size.width, height: DockMetrics.barThickness(settings))
+            : NSRect(origin: .zero, size: size)
     }
 
     init(displayID: CGDirectDisplayID) {
@@ -116,9 +137,8 @@ final class DockController {
         panel.hasShadow = !s.theme.isClear
         panel.invalidateShadow()
         if s.style == .bar {
-            // Leiste unten im Panel, darüber ein transparenter Streifen für die Hohlkehlen.
-            hosting.frame = NSRect(x: 0, y: 0, width: panel.frame.width, height: DockMetrics.barHeight(s))
-            hosting.autoresizingMask = [.width, .maxYMargin]
+            hosting.frame = barHostingFrame(panel.frame.size)
+            hosting.autoresizingMask = s.effectiveEdge == .bottom ? [.width, .maxYMargin] : [.width, .height]
             startShapeTracking()
         } else {
             hosting.frame = panel.contentView?.bounds ?? .zero
@@ -176,8 +196,15 @@ final class DockController {
         var f: NSRect
         switch settings.style {
         case .bar:
-            let h = DockMetrics.barHeight(settings) + DockMetrics.filletRadius
-            f = NSRect(x: sf.minX, y: sf.minY, width: sf.width, height: h)
+            // Oben unter der Menüleiste, seitlich zwischen Menüleiste und unterem Rand.
+            let vf = screen.visibleFrame
+            let t = DockMetrics.barThickness(settings)
+            switch settings.effectiveEdge {
+            case .bottom: f = NSRect(x: sf.minX, y: sf.minY, width: sf.width, height: t + DockMetrics.filletRadius)
+            case .top: f = NSRect(x: sf.minX, y: vf.maxY - t, width: sf.width, height: t)
+            case .left: f = NSRect(x: sf.minX, y: sf.minY, width: t, height: vf.maxY - sf.minY)
+            case .right: f = NSRect(x: sf.maxX - t, y: sf.minY, width: t, height: vf.maxY - sf.minY)
+            }
         case .pill:
             let vf = screen.visibleFrame
             let size = CGSize(width: min(ceil(pillSize.width), sf.width - 16), height: min(ceil(pillSize.height), vf.height - 16))
@@ -292,7 +319,7 @@ final class DockController {
             panel.invalidateShadow()
         }
         if settings.style == .bar {
-            hosting.frame = NSRect(x: 0, y: 0, width: f.width, height: DockMetrics.barHeight(settings))
+            hosting.frame = barHostingFrame(f.size)
             updateBarShape(force: true)
         }
     }
@@ -308,7 +335,8 @@ final class DockController {
 
     private func updateBarShape(force: Bool) {
         guard settings.style == .bar else { return }
-        let new = (settings.fitWindows && !settings.autoHide && !concealed) ? findFillets() : []
+        let bottom = settings.effectiveEdge == .bottom
+        let new = (bottom && settings.fitWindows && !settings.autoHide && !concealed) ? findFillets() : []
         let size = panel.frame.size
         guard force || new != fillets || size != shapeSize else { return }
         fillets = new
@@ -330,7 +358,7 @@ final class DockController {
                 as? [[String: Any]] else { return [] }
         let r = DockMetrics.filletRadius
         // CG-Koordinaten: oben links am Hauptbildschirm.
-        let barTop = primary.frame.height - sf.minY - DockMetrics.barHeight(settings)
+        let barTop = primary.frame.height - sf.minY - DockMetrics.barThickness(settings)
         let me = ProcessInfo.processInfo.processIdentifier
         var inFront: [CGRect] = []
         var result: [Fillet] = []
@@ -356,7 +384,8 @@ final class DockController {
     }
 
     private func barMask(size: CGSize) -> NSImage {
-        let h = DockMetrics.barHeight(settings)
+        guard settings.effectiveEdge == .bottom else { return Self.edgeMask(size: size, edge: settings.effectiveEdge) }
+        let h = DockMetrics.barThickness(settings)
         let r = DockMetrics.filletRadius
         let corner = DockMetrics.barCornerRadius
         let fillets = self.fillets
@@ -399,6 +428,35 @@ final class DockController {
                 p.close()
                 p.fill()
             }
+            return true
+        }
+    }
+
+    /// Leiste oben oder seitlich: Rechteck, nur die Ecken zur Bildschirmmitte hin gerundet.
+    private static func edgeMask(size: CGSize, edge: DockEdge) -> NSImage {
+        let r = DockMetrics.barCornerRadius
+        // Gerundete Ecken: unten links, unten rechts, oben rechts, oben links.
+        let (bl, br, tr, tl): (Bool, Bool, Bool, Bool) = switch edge {
+        case .top: (true, true, false, false)
+        case .left: (false, true, true, false)
+        case .right: (true, false, false, true)
+        case .bottom: (false, false, true, true)
+        }
+        return NSImage(size: size, flipped: false) { _ in
+            let w = size.width, h = size.height
+            let p = NSBezierPath()
+            p.move(to: NSPoint(x: bl ? r : 0, y: 0))
+            p.line(to: NSPoint(x: br ? w - r : w, y: 0))
+            if br { p.appendArc(withCenter: NSPoint(x: w - r, y: r), radius: r, startAngle: 270, endAngle: 360) }
+            p.line(to: NSPoint(x: w, y: tr ? h - r : h))
+            if tr { p.appendArc(withCenter: NSPoint(x: w - r, y: h - r), radius: r, startAngle: 0, endAngle: 90) }
+            p.line(to: NSPoint(x: tl ? r : 0, y: h))
+            if tl { p.appendArc(withCenter: NSPoint(x: r, y: h - r), radius: r, startAngle: 90, endAngle: 180) }
+            p.line(to: NSPoint(x: 0, y: bl ? r : 0))
+            if bl { p.appendArc(withCenter: NSPoint(x: r, y: r), radius: r, startAngle: 180, endAngle: 270) }
+            p.close()
+            NSColor.black.setFill()
+            p.fill()
             return true
         }
     }

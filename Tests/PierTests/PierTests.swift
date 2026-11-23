@@ -54,11 +54,12 @@ import AppKit
     // Hauptbildschirm 1470×956, zweiter rechts daneben, 1920×1080, Unterkanten bündig (Cocoa y = 0).
     let main = NSRect(x: 0, y: 0, width: 1470, height: 956)
     let ext = NSRect(x: 1470, y: 0, width: 1920, height: 1080)
-    #expect(WindowFitter.dockedScreenBottom(windowOrigin: CGPoint(x: 100, y: 50), screens: [main, ext], primaryHeight: 956) == 956)
+    #expect(WindowFitter.dockedScreen(windowOrigin: CGPoint(x: 100, y: 50), screens: [main, ext], primaryHeight: 956)?.maxY == 956)
     // Zweiter Bildschirm ragt 124 pt höher: AX-y beginnt bei -124, Unterkante bei 956.
-    #expect(WindowFitter.dockedScreenBottom(windowOrigin: CGPoint(x: 1600, y: -100), screens: [main, ext], primaryHeight: 956) == 956)
+    let second = WindowFitter.dockedScreen(windowOrigin: CGPoint(x: 1600, y: -100), screens: [main, ext], primaryHeight: 956)
+    #expect(second == CGRect(x: 1470, y: -124, width: 1920, height: 1080))
     // Bildschirm ohne Dock: kein Eingriff.
-    #expect(WindowFitter.dockedScreenBottom(windowOrigin: CGPoint(x: 1600, y: 50), screens: [main], primaryHeight: 956) == nil)
+    #expect(WindowFitter.dockedScreen(windowOrigin: CGPoint(x: 1600, y: 50), screens: [main], primaryHeight: 956) == nil)
 }
 
 // MARK: Intelligent anordnen
@@ -346,4 +347,86 @@ private func allAppKeys(_ entries: [DockEntry]) -> [String] {
     }
     let c = ArtworkColor.average(img)!
     #expect(c.redComponent > 0.35 && c.redComponent < 0.65)
+}
+
+
+// MARK: Block 3 (Leiste an allen Kanten, mehrere Zeilen)
+
+@Test func oneRowBarKeepsItsHeight() {
+    var s = DockSettings()
+    s.style = .bar
+    #expect(DockMetrics.barThickness(s) == DockMetrics.barIcon(s) + 18)
+    #expect(DockMetrics.barTabHeight(s) == DockMetrics.barIcon(s) + 6)
+    s.barRows = 3
+    #expect(DockMetrics.barThickness(s) == 3 * DockMetrics.barTabHeight(s) + 2 * 4 + 12)
+    s.edge = .left   // seitlich: eine Spalte, Zeilen zählen nicht
+    #expect(DockMetrics.barRows(s) == 1 && DockMetrics.barThickness(s) == 210)
+    s.barLabels = .iconsOnly
+    #expect(DockMetrics.barThickness(s) == DockMetrics.barIcon(s) + 18)
+}
+
+@Test func barRowsSurviveRoundTripAndClamp() throws {
+    var s = DockSettings()
+    s.barRows = 4
+    #expect(try JSONDecoder().decode(DockSettings.self, from: JSONEncoder().encode(s)).barRows == 4)
+    let wild = try JSONDecoder().decode(DockSettings.self, from: Data(#"{"barRows":9}"#.utf8))
+    #expect(wild.barRows == 5)
+}
+
+@Test func fitterKeepsWindowsOutOfBarOnEveryEdge() {
+    let screen = CGRect(x: 0, y: 0, width: 1470, height: 956)   // AX
+    let win = CGRect(x: 0, y: 37, width: 1470, height: 919)      // „Füllen“: ganzer Bildschirm unter der Menüleiste
+    #expect(WindowFitter.fittedFrame(win, screen: screen, edge: .bottom, reserved: 46, previous: nil)
+            == CGRect(x: 0, y: 37, width: 1470, height: 873))
+    #expect(WindowFitter.fittedFrame(win, screen: screen, edge: .top, reserved: 83, previous: nil)
+            == CGRect(x: 0, y: 83, width: 1470, height: 873))
+    #expect(WindowFitter.fittedFrame(win, screen: screen, edge: .left, reserved: 210, previous: nil)
+            == CGRect(x: 210, y: 37, width: 1260, height: 919))
+    #expect(WindowFitter.fittedFrame(win, screen: screen, edge: .right, reserved: 210, previous: nil)
+            == CGRect(x: 0, y: 37, width: 1260, height: 919))
+    // Fenster außerhalb des Streifens bleiben, wie sie sind.
+    let small = CGRect(x: 400, y: 300, width: 500, height: 400)
+    for e in DockEdge.allCases { #expect(WindowFitter.fittedFrame(small, screen: screen, edge: e, reserved: 210, previous: nil) == nil) }
+    // Fast ganz im Streifen (weniger als 150 pt blieben übrig): nicht anfassen.
+    #expect(WindowFitter.fittedFrame(CGRect(x: 0, y: 100, width: 300, height: 400), screen: screen, edge: .left,
+                                     reserved: 210, previous: nil) == nil)
+}
+
+@Test func fitterFollowsBarWhenRowsShrink() {
+    let screen = CGRect(x: 0, y: 0, width: 1470, height: 956)
+    // Fenster endete bündig über einer 3-zeiligen Leiste (120 pt); jetzt nur noch 46 pt → wächst mit nach unten.
+    let docked = CGRect(x: 0, y: 37, width: 800, height: 956 - 120 - 37)
+    #expect(WindowFitter.fittedFrame(docked, screen: screen, edge: .bottom, reserved: 46, previous: 120)
+            == CGRect(x: 0, y: 37, width: 800, height: 873))
+    // Ohne gleiche Kante (previous nil) kein Mitwandern.
+    #expect(WindowFitter.fittedFrame(docked, screen: screen, edge: .bottom, reserved: 46, previous: nil) == nil)
+    // Oben: Fenster begann bündig unter der alten Leiste → rückt mit nach oben.
+    let top = CGRect(x: 0, y: 160, width: 800, height: 700)
+    #expect(WindowFitter.fittedFrame(top, screen: screen, edge: .top, reserved: 83, previous: 160)
+            == CGRect(x: 0, y: 83, width: 800, height: 777))
+}
+
+@Test func tabsSplitIntoRows() {
+    let items: [BarItem] = (0..<7).map { _ in .separator(UUID()) }
+    #expect(TabRow.split(items, rows: 1).map(\.count) == [7])
+    #expect(TabRow.split(items, rows: 3).map(\.count) == [3, 3, 1])
+    #expect(TabRow.split(items, rows: 5).map(\.count) == [2, 2, 2, 1])
+    #expect(TabRow.split([], rows: 3).map(\.count) == [0])
+    let line: [BarItem] = [.separator(UUID()), .launcher, .separator(UUID()), .launcher, .separator(UUID())]
+    #expect(TabRow.trimSeparators(line).map(\.isSeparator) == [false, true, false])
+}
+
+@Test func resizeHandleStepsRows() {
+    #expect(BarResizeHandle.rows(from: 1, drag: 70, step: 38, edge: .bottom) == 3)
+    #expect(BarResizeHandle.rows(from: 3, drag: -40, step: 38, edge: .bottom) == 2)
+    #expect(BarResizeHandle.rows(from: 1, drag: -80, step: 38, edge: .top) == 3)   // oben: nach unten ziehen
+    #expect(BarResizeHandle.rows(from: 2, drag: 1000, step: 38, edge: .bottom) == 5)
+    #expect(BarResizeHandle.rows(from: 2, drag: -1000, step: 38, edge: .bottom) == 1)
+}
+
+@Test func sideBarTabsShrinkToFit() {
+    let tabs: [BarItem] = (0..<10).map { _ in .launcher }
+    #expect(TabColumn.fittedHeight(tabs, height: 1000, tabHeight: 34) == 34)
+    #expect(TabColumn.fittedHeight(tabs, height: 300, tabHeight: 34) == 27)   // (300 − 27) / 10
+    #expect(TabColumn.fittedHeight(tabs, height: 50, tabHeight: 34) == 16)
 }

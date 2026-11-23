@@ -63,7 +63,10 @@ struct AppearanceTab: View {
 
     private var positionNote: String {
         if store.settings.style == .bar {
-            return "Die schlanke Leiste sitzt immer unten – seitlich gibt es nur die Pille. Beschriftung „Automatisch“ zeigt den Namen nur, wenn genug Platz ist. „Fenster gruppieren: Automatisch“ fasst die Fenster einer App erst zusammen, wenn es eng wird."
+            if store.settings.edge.isVertical {
+                return "Seitlich steht die Leiste als Spalte: mit Titeln 210 pt breit, bei „Nur Icons“ schmal. Passen nicht alle Tabs hinein, werden sie flacher; „Fenster gruppieren: Automatisch“ fasst dann zuerst die Fenster einer App zusammen."
+            }
+            return "Am Innenrand der Leiste ziehen (oder hier einstellen) ändert die Zahl der Zeilen. Beschriftung „Automatisch“ zeigt den Namen nur, wenn genug Platz ist. „Fenster gruppieren: Automatisch“ fasst die Fenster einer App erst zusammen, wenn es eng wird."
         }
         if store.settings.isFree {
             return "Frei: Zieh die Pille am Griff (≡) an eine beliebige Stelle. Dort bleibt sie, auch nach einem Neustart."
@@ -126,7 +129,6 @@ struct AppearanceTab: View {
                     ForEach(DockEdge.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .disabled(store.settings.style == .bar)
                 Picker("Ausrichtung", selection: $store.settings.placement) {
                     ForEach(PillPlacement.allCases) { Text($0.title(vertical: store.settings.edge.isVertical)).tag($0) }
                 }
@@ -137,6 +139,10 @@ struct AppearanceTab: View {
                 }
                 .pickerStyle(.segmented)
                 .disabled(store.settings.style != .bar)
+                Stepper(value: $store.settings.barRows, in: 1...DockMetrics.maxBarRows) {
+                    LabeledContent("Zeilen der Leiste", value: "\(store.settings.barRows)")
+                }
+                .disabled(store.settings.style != .bar || store.settings.edge.isVertical)
                 Picker("Fenster gruppieren", selection: $store.settings.windowGrouping) {
                     ForEach(WindowGrouping.allCases) { Text($0.title).tag($0) }
                 }
@@ -174,9 +180,10 @@ struct AppearanceTab: View {
 
             Section {
                 Toggle("Fenster automatisch über dem Dock halten", isOn: $store.settings.fitWindows)
-                    .disabled(store.settings.autoHide || store.settings.effectiveEdge != .bottom || store.settings.isFree)
+                    .disabled(store.settings.autoHide || store.settings.isFree
+                              || (store.settings.style == .pill && store.settings.effectiveEdge != .bottom))
             } footer: {
-                Text("Wird ein Fenster so groß gezogen oder gezoomt, dass es unter das Dock reicht, kürzt Pier es bis zur Oberkante. Bei „automatisch ausblenden“ nicht nötig, und nur für das Dock unten (nicht frei schwebend).")
+                Text("Wird ein Fenster so groß gezogen oder gezoomt, dass es unter das Dock reicht, kürzt bzw. verschiebt Pier es bis an den Rand des Docks – bei der Leiste an jeder Kante, bei der Pille nur unten (nicht frei schwebend). Bei „automatisch ausblenden“ nicht nötig. Wechselt die Leiste die Kante, wandern Fenster nicht von selbst zurück.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

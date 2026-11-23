@@ -72,14 +72,8 @@ final class WindowSnapper {
         guard let primary = NSScreen.screens.first,
               let screen = NSScreen.screens.first(where: { $0.frame.contains(p) }) ?? NSScreen.main,
               let current = frame(of: window) else { return }
-        var area = screen.visibleFrame
         // Platz fürs Pier-Dock freihalten (nur am Bildschirm, an dem es angedockt ist).
-        let reserved = WindowFitter.shared.reserved(on: screen)
-        if reserved > 0 {
-            let top = area.maxY
-            area.origin.y = max(area.minY, screen.frame.minY + reserved)
-            area.size.height = top - area.minY
-        }
+        let area = WindowFitter.shared.freeArea(on: screen)
         // AX-Koordinaten: oben links am Hauptbildschirm.
         let ax = CGRect(x: area.minX, y: primary.frame.height - area.maxY, width: area.width, height: area.height)
         var target: CGRect
