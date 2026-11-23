@@ -65,7 +65,7 @@ struct AppearanceTab: View {
             } header: { Text("Stil") }
 
             Section {
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 12) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 5), spacing: 12) {
                     ForEach(DockTheme.allCases) { theme in
                         ThemeChoice(theme: theme, selected: store.settings.theme == theme) {
                             store.settings.theme = theme
@@ -91,11 +91,16 @@ struct AppearanceTab: View {
                 }
                 .pickerStyle(.segmented)
                 .disabled(store.settings.style == .bar)
+                Picker("Beschriftung der Leiste", selection: $store.settings.barLabels) {
+                    ForEach(BarLabels.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .disabled(store.settings.style != .bar)
                 Toggle("Dock automatisch ausblenden", isOn: $store.settings.autoHide)
                 Toggle("Dock auf allen Bildschirmen", isOn: $store.settings.allScreens)
             } footer: {
                 if store.settings.style == .bar {
-                    Text("Die schlanke Leiste sitzt immer unten – seitlich gibt es nur die Pille.")
+                    Text("Die schlanke Leiste sitzt immer unten – seitlich gibt es nur die Pille. Beschriftung „Automatisch“ zeigt den Namen nur, wenn genug Platz ist; „Icon und Text“ kürzt ihn notfalls.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -185,7 +190,14 @@ struct ThemeChoice: View {
         Button(action: action) {
             VStack(spacing: 6) {
                 ZStack(alignment: .bottom) {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.regularMaterial)
+                    if theme.isClear {
+                        // Transparent: angedeuteter Schreibtisch-Hintergrund statt Glas.
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(LinearGradient(colors: [Color.blue.opacity(0.35), Color.purple.opacity(0.3)],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+                    } else {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.regularMaterial)
+                    }
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(LinearGradient(colors: theme.glass.isEmpty ? [.clear] : theme.glass.map { $0.opacity(0.55) },
                                              startPoint: .topLeading, endPoint: .bottomTrailing))

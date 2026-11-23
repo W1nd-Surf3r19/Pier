@@ -208,7 +208,7 @@ struct GlassIsland<Content: View>: View {
             .padding(.bottom, edge == .bottom ? 9 : (edge == .top ? 6 : 7))
             .padding(.leading, edge == .left ? 9 : (edge == .right ? 6 : 7))
             .padding(.trailing, edge == .right ? 9 : (edge == .left ? 6 : 7))
-            .background { ZStack { GlassBackground(); Capsule().fill(theme.glassTint) } }
+            .background { ZStack { if !theme.isClear { GlassBackground() }; Capsule().fill(theme.glassTint) } }
             .background(Capsule().fill(Color.black.opacity(0.001)))
             .overlay(
                 Capsule().fill(

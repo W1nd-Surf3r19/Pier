@@ -204,6 +204,8 @@ struct LauncherView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Gleiche Rundung wie das Glas-Panel (makeGlass radius: 24).
+        .background(RoundedRectangle(cornerRadius: 24).fill(DockStore.shared.settings.theme.glassTint))
         .onChange(of: model.focusToken, initial: true) { DispatchQueue.main.async { focused = true } }
     }
 }

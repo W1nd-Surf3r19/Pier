@@ -46,7 +46,8 @@ final class DockController {
 
     init(displayID: CGDirectDisplayID) {
         self.displayID = displayID
-        let (panel, effect) = PanelFactory.makeGlass(PassivePanel.self, level: PanelFactory.dockLevel, radius: DockMetrics.pillRadius)
+        // Keine Anfangsmaske: macOS übernimmt die Maske des ersten Inhalts als Fensterform und rundete sonst die Leiste unten ab.
+        let (panel, effect) = PanelFactory.makeGlass(PassivePanel.self, level: PanelFactory.dockLevel, radius: nil)
         self.panel = panel
         self.effect = effect
         hosting = FirstMouseHostingView(rootView: DockRootView(fit: fit, onSize: { _ in }))
@@ -98,7 +99,10 @@ final class DockController {
     func apply(_ s: DockSettings) {
         let styleChanged = s.style != settings.style || s.effectiveEdge != settings.effectiveEdge
         settings = s
-        effect.isHidden = s.style == .pill
+        effect.isHidden = s.style == .pill || s.theme.isClear
+        // Ohne Glas würde der Fensterschatten jedes Icon einzeln umranden.
+        panel.hasShadow = !s.theme.isClear
+        panel.invalidateShadow()
         tint.colors = s.theme.glass.isEmpty ? nil : s.theme.glass.map { NSColor($0).withAlphaComponent(0.2).cgColor }
         if s.style == .bar {
             // Leiste unten im Panel, darüber ein transparenter Streifen für die Hohlkehlen.

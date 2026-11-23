@@ -120,7 +120,7 @@ struct BarDockView: View {
         let height = DockMetrics.barHeight(settings) - 12
 
         HStack(spacing: 0) {
-            TabRow(items: items, height: height)
+            TabRow(items: items, height: height, labels: settings.barLabels)
                 .padding(.leading, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if strip.hasContent {
@@ -166,7 +166,8 @@ struct BarDockView: View {
 struct TabRow: View {
     let items: [BarItem]
     let height: CGFloat
-    private let compactWidth: CGFloat = 40
+    var labels: BarLabels = .automatic
+    static let compactWidth: CGFloat = 40
     private let separatorWidth: CGFloat = 9
     private let spacing: CGFloat = 4
 
@@ -175,15 +176,15 @@ struct TabRow: View {
             let seps = CGFloat(items.filter(\.isSeparator).count)
             let compact = CGFloat(items.filter(\.isCompact).count) - seps
             let wide = CGFloat(items.count) - compact - seps
-            let free = geo.size.width - compact * compactWidth - seps * separatorWidth
+            let free = geo.size.width - compact * Self.compactWidth - seps * separatorWidth
                 - spacing * CGFloat(max(items.count - 1, 0))
             let per = wide > 0 ? (free / wide).rounded(.down) : 0
-            let showTitle = per >= 84
+            let showTitle = TabRow.showsTitle(labels, widthPerTab: per)
             HStack(spacing: spacing) {
                 ForEach(items) { item in
                     BarItemView(item: item, height: height,
                                 width: item.isSeparator ? separatorWidth
-                                    : (item.isCompact || !showTitle ? compactWidth : min(210, per)),
+                                    : (item.isCompact || !showTitle ? Self.compactWidth : min(210, per)),
                                 showTitle: !item.isCompact && showTitle)
                 }
             }
@@ -191,6 +192,15 @@ struct TabRow: View {
         }
         .frame(height: height)
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: items.map(\.id))
+    }
+
+    /// Automatisch: Text nur, wenn jeder Tab mindestens 84 pt bekommt. „Icon und Text“ zeigt ihn immer (notfalls gekürzt).
+    static func showsTitle(_ labels: BarLabels, widthPerTab: CGFloat) -> Bool {
+        switch labels {
+        case .automatic: widthPerTab >= 84
+        case .iconsOnly: false
+        case .iconAndText: widthPerTab > compactWidth
+        }
     }
 }
 

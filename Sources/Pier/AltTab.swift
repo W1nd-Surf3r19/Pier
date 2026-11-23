@@ -151,6 +151,9 @@ struct SwitcherView: View {
             }
             .onChange(of: model.selection) { _, s in proxy.scrollTo(s, anchor: .center) }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Gleiche Rundung wie das Glas-Panel (makeGlass radius: 18).
+        .background(RoundedRectangle(cornerRadius: 18).fill(DockStore.shared.settings.theme.glassTint))
     }
 }
 

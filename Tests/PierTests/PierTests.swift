@@ -172,3 +172,12 @@ private func allAppKeys(_ entries: [DockEntry]) -> [String] {
     let unknown = try JSONDecoder().decode(DockSettings.self, from: Data(#"{"iconSize":50,"theme":"neon"}"#.utf8))
     #expect(unknown.theme == .system && unknown.iconSize == 50)
 }
+
+@Test func barLabelsDecideWhetherTabsShowTitles() throws {
+    #expect(TabRow.showsTitle(.automatic, widthPerTab: 84))
+    #expect(!TabRow.showsTitle(.automatic, widthPerTab: 60))
+    #expect(!TabRow.showsTitle(.iconsOnly, widthPerTab: 200))
+    #expect(TabRow.showsTitle(.iconAndText, widthPerTab: 60))
+    #expect(!TabRow.showsTitle(.iconAndText, widthPerTab: 40)) // kein Platz für Text neben dem Icon
+    #expect(try JSONDecoder().decode(DockSettings.self, from: Data("{}".utf8)).barLabels == .automatic)
+}

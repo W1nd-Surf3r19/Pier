@@ -98,9 +98,22 @@ enum AppearanceMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Beschriftung der Tabs in der Leiste.
+enum BarLabels: String, Codable, CaseIterable, Identifiable {
+    case automatic, iconsOnly, iconAndText
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .automatic: "Automatisch"
+        case .iconsOnly: "Nur Icons"
+        case .iconAndText: "Icon und Text"
+        }
+    }
+}
+
 /// Farbthema: Akzentfarbe (aktive App, Fortschritt, Auswahl) und eine leichte Tönung des Dock-Glases.
 enum DockTheme: String, Codable, CaseIterable, Identifiable {
-    case system, graphite, midnight, ocean, lavender, coral, sage, sunset
+    case system, graphite, midnight, ocean, lavender, coral, sage, sunset, clear
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -112,11 +125,12 @@ enum DockTheme: String, Codable, CaseIterable, Identifiable {
         case .coral: "Koralle"
         case .sage: "Salbei"
         case .sunset: "Abendrot"
+        case .clear: "Transparent"
         }
     }
     var accent: Color {
         switch self {
-        case .system: .accentColor
+        case .system, .clear: .accentColor
         case .graphite: Color(nsColor: .systemGray)
         case .midnight: .indigo
         case .ocean: .cyan
@@ -129,7 +143,7 @@ enum DockTheme: String, Codable, CaseIterable, Identifiable {
     /// Verlauf für die Glas-Tönung (oben links → unten rechts). Leer = ungefärbtes Glas.
     var glass: [Color] {
         switch self {
-        case .system: []
+        case .system, .clear: []
         case .graphite: [Color(white: 0.55), Color(white: 0.3)]
         case .midnight: [.indigo, .blue]
         case .ocean: [.blue, .cyan]
@@ -139,6 +153,8 @@ enum DockTheme: String, Codable, CaseIterable, Identifiable {
         case .sunset: [.orange, .pink]
         }
     }
+    /// Kein Milchglas im Dock – der Hintergrund scheint unverändert durch.
+    var isClear: Bool { self == .clear }
     var glassTint: LinearGradient {
         LinearGradient(colors: glass.isEmpty ? [.clear] : glass.map { $0.opacity(0.2) },
                        startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -150,6 +166,7 @@ struct DockSettings: Codable, Equatable {
     var iconSize: Double = 42
     var appearance: AppearanceMode = .system
     var theme: DockTheme = .system
+    var barLabels: BarLabels = .automatic
     var autoHide = false
     var hideSystemDock = true
     var showLauncher = true
@@ -190,6 +207,7 @@ struct DockSettings: Codable, Equatable {
         iconSize = v(.iconSize, d.iconSize)
         appearance = v(.appearance, d.appearance)
         theme = v(.theme, d.theme)
+        barLabels = v(.barLabels, d.barLabels)
         autoHide = v(.autoHide, d.autoHide)
         hideSystemDock = v(.hideSystemDock, d.hideSystemDock)
         showLauncher = v(.showLauncher, d.showLauncher)
