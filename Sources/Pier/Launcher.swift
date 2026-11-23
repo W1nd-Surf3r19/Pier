@@ -211,6 +211,7 @@ struct LauncherView: View {
 struct LauncherCell: View {
     let item: LaunchItem
     let selected: Bool
+    private var theme: DockTheme { DockStore.shared.settings.theme }
 
     var body: some View {
         VStack(spacing: 7) {
@@ -227,7 +228,7 @@ struct LauncherCell: View {
         .frame(width: 112, height: 104)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(selected ? Color.accentColor.opacity(0.22) : Color.clear)
+                .fill(selected ? theme.accent.opacity(0.22) : Color.clear)
         )
         .contentShape(Rectangle())
     }

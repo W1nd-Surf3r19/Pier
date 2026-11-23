@@ -199,6 +199,7 @@ struct GlassBackground: NSViewRepresentable {
 struct GlassIsland<Content: View>: View {
     @ViewBuilder var content: Content
     @Environment(\.dockEdge) private var edge
+    @Environment(\.dockTheme) private var theme
 
     var body: some View {
         // Zur Bildschirmkante hin etwas mehr Platz für den Lauf-Indikator.
@@ -207,7 +208,7 @@ struct GlassIsland<Content: View>: View {
             .padding(.bottom, edge == .bottom ? 9 : (edge == .top ? 6 : 7))
             .padding(.leading, edge == .left ? 9 : (edge == .right ? 6 : 7))
             .padding(.trailing, edge == .right ? 9 : (edge == .left ? 6 : 7))
-            .background(GlassBackground())
+            .background { ZStack { GlassBackground(); Capsule().fill(theme.glassTint) } }
             .background(Capsule().fill(Color.black.opacity(0.001)))
             .overlay(
                 Capsule().fill(

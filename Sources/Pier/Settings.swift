@@ -65,6 +65,17 @@ struct AppearanceTab: View {
             } header: { Text("Stil") }
 
             Section {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 4), spacing: 12) {
+                    ForEach(DockTheme.allCases) { theme in
+                        ThemeChoice(theme: theme, selected: store.settings.theme == theme) {
+                            store.settings.theme = theme
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            } header: { Text("Farbthema") }
+
+            Section {
                 LabeledContent("Icon-Größe") {
                     HStack {
                         Slider(value: $store.settings.iconSize, in: 30...64, step: 2)
@@ -161,6 +172,38 @@ struct StyleChoice: View {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity)
+    }
+}
+
+/// Vorschau eines Farbthemas: getöntes Glas mit dem Akzent-Strich der aktiven App.
+struct ThemeChoice: View {
+    let theme: DockTheme
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                ZStack(alignment: .bottom) {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(.regularMaterial)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(LinearGradient(colors: theme.glass.isEmpty ? [.clear] : theme.glass.map { $0.opacity(0.55) },
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                    Capsule().fill(theme.accent).frame(width: 22, height: 3.5)
+                        .shadow(color: theme.accent.opacity(0.6), radius: 3)
+                        .padding(.bottom, 7)
+                }
+                .frame(height: 44)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(selected ? Color.accentColor : Color.primary.opacity(0.12), lineWidth: selected ? 2.5 : 1)
+                )
+                Text(theme.title).font(.system(size: 11, weight: selected ? .semibold : .regular))
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Farbthema \(theme.title)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

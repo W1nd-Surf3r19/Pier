@@ -182,6 +182,7 @@ struct PopupRootView: View {
         .fixedSize()
         .onGeometryChange(for: CGSize.self) { $0.size } action: { onSize($0) }
         .onHoverAlways { h, _ in Coordinator.shared.popup.setPopupHovered(h) }
+        .environment(\.dockTheme, DockStore.shared.settings.theme)
     }
 }
 
@@ -243,6 +244,7 @@ struct WindowCard: View {
     @State private var loaded = false
     @State private var hovering = false
     @State private var dragging = false
+    @Environment(\.dockTheme) private var theme
 
     private var title: String {
         window.title.isEmpty ? (NSRunningApplication(processIdentifier: window.pid)?.localizedName ?? "Fenster") : window.title
@@ -312,7 +314,7 @@ struct WindowCard: View {
             }
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(Color.accentColor.opacity(hovering ? 0.9 : 0), lineWidth: 2)
+                    .strokeBorder(theme.accent.opacity(hovering ? 0.9 : 0), lineWidth: 2)
             )
             Text(title)
                 .font(.system(size: 11.5, weight: .medium))

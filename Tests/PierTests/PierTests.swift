@@ -161,3 +161,14 @@ private func allAppKeys(_ entries: [DockEntry]) -> [String] {
     #expect(plan([.internet, .communication, .finder]).entries.first == .app(safari))
     #expect(plan([.internet, .communication, .finder]).groups.map(\.category) == [.internet, .communication, .finder, .development])
 }
+
+@Test func themeSurvivesSaveAndOldConfigsDefaultToSystem() throws {
+    var s = DockSettings()
+    s.theme = .ocean
+    let back = try JSONDecoder().decode(DockSettings.self, from: JSONEncoder().encode(s))
+    #expect(back.theme == .ocean)
+    // Konfiguration von vor den Farbthemen (oder mit unbekanntem Thema) lädt weiter.
+    #expect(try JSONDecoder().decode(DockSettings.self, from: Data(#"{"iconSize":50}"#.utf8)).theme == .system)
+    let unknown = try JSONDecoder().decode(DockSettings.self, from: Data(#"{"iconSize":50,"theme":"neon"}"#.utf8))
+    #expect(unknown.theme == .system && unknown.iconSize == 50)
+}

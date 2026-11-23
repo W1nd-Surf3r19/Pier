@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 
 struct PinnedApp: Codable, Hashable, Identifiable {
     var id = UUID()
@@ -97,10 +98,58 @@ enum AppearanceMode: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// Farbthema: Akzentfarbe (aktive App, Fortschritt, Auswahl) und eine leichte Tönung des Dock-Glases.
+enum DockTheme: String, Codable, CaseIterable, Identifiable {
+    case system, graphite, midnight, ocean, lavender, coral, sage, sunset
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .system: "System"
+        case .graphite: "Graphit"
+        case .midnight: "Mitternacht"
+        case .ocean: "Ozean"
+        case .lavender: "Lavendel"
+        case .coral: "Koralle"
+        case .sage: "Salbei"
+        case .sunset: "Abendrot"
+        }
+    }
+    var accent: Color {
+        switch self {
+        case .system: .accentColor
+        case .graphite: Color(nsColor: .systemGray)
+        case .midnight: .indigo
+        case .ocean: .cyan
+        case .lavender: .purple
+        case .coral: .pink
+        case .sage: .mint
+        case .sunset: .orange
+        }
+    }
+    /// Verlauf für die Glas-Tönung (oben links → unten rechts). Leer = ungefärbtes Glas.
+    var glass: [Color] {
+        switch self {
+        case .system: []
+        case .graphite: [Color(white: 0.55), Color(white: 0.3)]
+        case .midnight: [.indigo, .blue]
+        case .ocean: [.blue, .cyan]
+        case .lavender: [.purple, .indigo]
+        case .coral: [.pink, .orange]
+        case .sage: [.green, .mint]
+        case .sunset: [.orange, .pink]
+        }
+    }
+    var glassTint: LinearGradient {
+        LinearGradient(colors: glass.isEmpty ? [.clear] : glass.map { $0.opacity(0.2) },
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+}
+
 struct DockSettings: Codable, Equatable {
     var style: DockStyle = .pill
     var iconSize: Double = 42
     var appearance: AppearanceMode = .system
+    var theme: DockTheme = .system
     var autoHide = false
     var hideSystemDock = true
     var showLauncher = true
@@ -140,6 +189,7 @@ struct DockSettings: Codable, Equatable {
         style = v(.style, d.style)
         iconSize = v(.iconSize, d.iconSize)
         appearance = v(.appearance, d.appearance)
+        theme = v(.theme, d.theme)
         autoHide = v(.autoHide, d.autoHide)
         hideSystemDock = v(.hideSystemDock, d.hideSystemDock)
         showLauncher = v(.showLauncher, d.showLauncher)

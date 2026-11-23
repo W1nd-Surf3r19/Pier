@@ -159,6 +159,7 @@ struct SwitcherCell: View {
     let selected: Bool
     let thumbnails: Bool
     let size: CGSize
+    private var theme: DockTheme { DockStore.shared.settings.theme }
     @State private var image: NSImage?
 
     var body: some View {
@@ -188,7 +189,7 @@ struct SwitcherCell: View {
         .frame(width: size.width, height: size.height)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(selected ? 0.16 : 0.04)))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(Color.accentColor.opacity(selected ? 0.9 : 0), lineWidth: 2))
+            .strokeBorder(theme.accent.opacity(selected ? 0.9 : 0), lineWidth: 2))
         .contentShape(Rectangle())
         .onTapGesture { Coordinator.shared.altTab.choose(item) }
         .task(id: item.window.windowID) {

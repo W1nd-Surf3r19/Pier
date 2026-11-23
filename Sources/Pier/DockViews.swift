@@ -18,6 +18,7 @@ struct DockRootView: View {
             }
         }
         .environment(\.dockEdge, s.effectiveEdge)
+        .environment(\.dockTheme, s.theme)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { onSize($0) }
         .dropDestination(for: URL.self) { urls, _ in Coordinator.shared.drop(urls, onto: nil) }
         .contextMenu {
@@ -128,6 +129,7 @@ struct BarDockView: View {
         }
         .padding(.top, 1)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(settings.theme.glassTint)
         .contentShape(Rectangle())
     }
 
@@ -199,6 +201,7 @@ struct BarItemView: View {
     let width: CGFloat
     let showTitle: Bool
     @ObservedObject var running = RunningAppsModel.shared
+    @Environment(\.dockTheme) private var theme
     @State private var anchor: CGRect = .zero
 
     var body: some View {
@@ -223,7 +226,7 @@ struct BarItemView: View {
                    action: { Coordinator.shared.toggleFolder(f, anchor: anchor) }) {
                 Image(systemName: "folder.fill")
                     .font(.system(size: 15))
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(theme.accent)
             }
             .onHoverAlways { h, r in if h { anchor = r } }
         case .separator:
@@ -277,6 +280,7 @@ struct BarTab<Label: View>: View {
     var hoverAlways = true
     let action: () -> Void
     @ViewBuilder let label: Label
+    @Environment(\.dockTheme) private var theme
 
     @State private var hovering = false
     @State private var pulse = false
@@ -293,10 +297,10 @@ struct BarTab<Label: View>: View {
                 )
                 .overlay(alignment: .bottom) {
                     Capsule()
-                        .fill(Color.accentColor)
-                        .frame(width: active ? 16 : 0, height: 2.5)
-                        .shadow(color: Color.accentColor.opacity(0.6), radius: 3)
-                        .padding(.bottom, 1.5)
+                        .fill(theme.accent)
+                        .frame(width: active ? 24 : 0, height: 3.5)
+                        .shadow(color: theme.accent.opacity(0.6), radius: 4)
+                        .padding(.bottom, 1)
                 }
                 .opacity(dimmed ? 0.5 : (launching && pulse ? 0.45 : 1))
                 .contentShape(Rectangle())
@@ -522,13 +526,14 @@ struct AppIconImage: View {
 struct RunIndicator: View {
     let state: RunState
     var vertical = false
+    @Environment(\.dockTheme) private var theme
     var body: some View {
         let long: CGFloat = state == .active ? 14 : 4
         let short: CGFloat = state == .active ? 3.5 : 4
         Capsule()
-            .fill(state == .active ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary.opacity(opacity)))
+            .fill(state == .active ? AnyShapeStyle(theme.accent) : AnyShapeStyle(Color.primary.opacity(opacity)))
             .frame(width: vertical ? short : long, height: vertical ? long : short)
-            .shadow(color: state == .active ? Color.accentColor.opacity(0.7) : .clear, radius: 4)
+            .shadow(color: state == .active ? theme.accent.opacity(0.7) : .clear, radius: 4)
             .animation(.spring(response: 0.3, dampingFraction: 0.75), value: state)
     }
 
@@ -611,20 +616,21 @@ struct DockStatusModifier: ViewModifier {
     @ObservedObject var running = RunningAppsModel.shared
     @ObservedObject var store = DockStore.shared
     @ObservedObject var activity = ActivityModel.shared
+    @Environment(\.dockTheme) private var theme
     @State private var flash = false
 
     func body(content: Content) -> some View {
         let on = store.settings.showBadges
         let wantsAttention = on && key.map { running.attention.contains($0) } == true
         content
-            .shadow(color: Color.accentColor.opacity(flash ? 0.95 : 0), radius: 7)
+            .shadow(color: theme.accent.opacity(flash ? 0.95 : 0), radius: 7)
             .scaleEffect(flash ? 1.08 : 1)
             .overlay(alignment: .bottom) {
                 if on, let key, let p = running.progress[key] {
                     GeometryReader { g in
                         ZStack(alignment: .leading) {
                             Capsule().fill(.black.opacity(0.45))
-                            Capsule().fill(Color.accentColor).frame(width: max(3, g.size.width * p))
+                            Capsule().fill(theme.accent).frame(width: max(3, g.size.width * p))
                         }
                     }
                     .frame(height: 4)
@@ -717,6 +723,7 @@ private struct DockEdgeKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
+    @Entry var dockTheme = DockTheme.system
     var dockEdge: DockEdge {
         get { self[DockEdgeKey.self] }
         set { self[DockEdgeKey.self] = newValue }
