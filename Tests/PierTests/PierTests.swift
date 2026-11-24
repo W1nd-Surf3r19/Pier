@@ -219,7 +219,7 @@ private func allAppKeys(_ entries: [DockEntry]) -> [String] {
     #expect(BarItemView.title("Mail", progress: nil, hung: false) == "Mail")
 }
 
-// MARK: Block 1 + 2 (uBar-Funktionen)
+// MARK: Block 1 + 2 (Leisten-Funktionen)
 
 @Test func newSettingsSurviveRoundTrip() throws {
     var s = DockSettings()
