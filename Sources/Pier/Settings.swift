@@ -515,7 +515,7 @@ struct WidgetsTab: View {
                 Toggle("Aktuelle Musik (Apple Music, Spotify)", isOn: $store.settings.showNowPlaying)
                 Toggle("Badges, Fortschritt und Hinweise an App-Icons", isOn: $store.settings.showBadges)
             } header: { Text("Im Dock anzeigen") } footer: {
-                Text("Darüberfahren über die Uhr zeigt Kalender und Zifferblatt. Die Musik-Anzeige erscheint, sobald Music oder Spotify einen Titel startet oder pausiert. Badges übernimmt Pier vom ausgeblendeten Mac-Dock (braucht Bedienungshilfen). Die Geräte-Kachel erscheint, sobald ein Laufwerk angeschlossen ist oder Bluetooth eingeschaltet ist; macOS fragt beim ersten Öffnen nach der Bluetooth-Erlaubnis.")
+                Text("Darüberfahren über die Uhr zeigt Kalender, Zifferblatt und deine Termine (nach einmaliger Kalender-Erlaubnis). Die Musik-Anzeige erscheint, sobald Music oder Spotify einen Titel startet oder pausiert. Badges übernimmt Pier vom ausgeblendeten Mac-Dock (braucht Bedienungshilfen). Die Geräte-Kachel erscheint, sobald ein Laufwerk angeschlossen ist oder Bluetooth eingeschaltet ist; macOS fragt beim ersten Öffnen nach der Bluetooth-Erlaubnis.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

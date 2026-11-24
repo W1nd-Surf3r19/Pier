@@ -162,7 +162,7 @@ Das Thema bestimmt die Akzentfarbe für die aktive App, Fortschritt und Auswahl 
 
 - Launchpad-Ersatz mit Sofortsuche über Apps, Bereiche der Systemeinstellungen und Ordner (Benutzerordner plus eigene), öffnet über die Dock-Kachel oder <kbd>⌥</kbd> <kbd>Leertaste</kbd>
 - 🎵 Musik-Widget für Music und Spotify mit Steuerung über die Medientasten; in der Leiste wird stattdessen der Tab des Players breiter und zeigt Titel, Interpret, Abspielen/Pause und Weiter
-- 🕐 Uhr: darüberfahren zeigt Kalender (Woche ab Montag) und Zifferblatt
+- 🕐 Uhr: darüberfahren zeigt Kalender (Woche ab Montag), Zifferblatt und deine Termine aus der Kalender-App; Tage mit Terminen haben einen Punkt, ein Klick auf einen Tag zeigt dessen Termine
 - 🔋 Akku: darüberfahren zeigt Restlaufzeit, maximale Kapazität, Zustand und Ladezyklen
 - 🔊 Ton: Ausgang und Eingang per Klick wechseln
 - 💾 Geräte: externe Laufwerke einzeln oder alle auswerfen, auf Wunsch gekoppelte Bluetooth-Geräte verbinden oder trennen
@@ -239,12 +239,15 @@ echo <SHA-1-Hash> > .sign-identity
 > - **Bildschirmaufnahme** für die Fenster-Vorschau
 >
 > **Bluetooth** nur, wenn die Bluetooth-Liste eingeschaltet ist; macOS fragt beim ersten Öffnen.
+>
+> **Kalender** nur, wenn du im Kalender-Popup auf „Termine aus der Kalender-App anzeigen“ klickst.
 
 <a id="datenschutz"></a>
 
 ## 🔒 Datenschutz
 
 - Pier sendet keine Daten ins Internet. Die einzige Netzabfrage lädt das Spotify-Cover von der Adresse, die Spotify selbst liefert.
+- Termine liest Pier nur lesend aus der Kalender-App und nur zur Anzeige; sie werden weder gespeichert noch verschickt.
 - Nutzungsdaten für „Intelligent anordnen“ (wie lange welche App vorn war) bleiben lokal in `~/Library/Application Support/Pier/usage.json`.
 - Pier ändert die Mac-Dock-Einstellungen `autohide` und `autohide-delay`, um das Mac-Dock auszublenden, und stellt sie beim Beenden wieder her.
 - Details und Meldung von Sicherheitslücken: [SECURITY.md](SECURITY.md)

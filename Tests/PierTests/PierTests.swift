@@ -464,3 +464,30 @@ private func allAppKeys(_ entries: [DockEntry]) -> [String] {
     #expect(ordered.after == [-1: ["Fotos"]])
     #expect(SmartArranger.place(apps, in: [], order: [], category: { cat[$0]! }, pinnedCategory: pinned).rest == apps)
 }
+
+@Test func calendarEventsForDay() {
+    let cal = MonthGrid.calendar
+    func d(_ day: Int, _ h: Int, _ m: Int = 0) -> Date { cal.date(from: DateComponents(year: 2026, month: 11, day: day, hour: h, minute: m))! }
+    func e(_ id: String, _ s: Date, _ end: Date, allDay: Bool = false) -> CalEvent {
+        CalEvent(id: id, title: id, start: s, end: end, allDay: allDay, color: nil)
+    }
+    let events = [
+        e("spät", d(24, 18), d(24, 19)),
+        e("früh", d(24, 8), d(24, 9)),
+        e("ganztags", d(24, 0), d(25, 0), allDay: true),
+        e("mehrtägig", d(23, 10), d(25, 12)),
+        e("morgen", d(25, 9), d(25, 10)),
+    ]
+    // Anderer Tag als heute: alles, was den Tag berührt, Ganztägiges zuerst.
+    #expect(CalEvent.on(d(24, 12), from: events, now: d(1, 0)).map(\.id) == ["ganztags", "mehrtägig", "früh", "spät"])
+    // Heute um 12 Uhr: Vorbeies fällt weg.
+    #expect(CalEvent.on(d(24, 12), from: events, now: d(24, 12)).map(\.id) == ["ganztags", "mehrtägig", "spät"])
+    // Ganztägig endet um Mitternacht und gehört nicht mehr zum Folgetag.
+    #expect(CalEvent.on(d(25, 12), from: events, now: d(1, 0)).map(\.id) == ["mehrtägig", "morgen"])
+}
+
+@Test func calendarDotColorsAreDistinct() {
+    let red = CGColor(red: 1, green: 0, blue: 0, alpha: 1), blue = CGColor(red: 0, green: 0, blue: 1, alpha: 1)
+    func e(_ c: CGColor?) -> CalEvent { CalEvent(id: UUID().uuidString, title: "", start: .now, end: .now, allDay: false, color: c) }
+    #expect(CalEvent.colors(of: [e(red), e(blue), e(red), e(nil), e(nil)]) == [red, blue, nil])
+}

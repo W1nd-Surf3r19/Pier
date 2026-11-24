@@ -1,5 +1,6 @@
 import AppKit
 import CoreAudio
+import EventKit
 import SwiftUI
 
 // MARK: Kalender mit Zifferblatt (beim Überfahren der Uhr)
@@ -24,6 +25,75 @@ enum MonthGrid {
     }
 }
 
+/// Ein Termin aus der Kalender-App, auf das Nötige reduziert.
+struct CalEvent: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let start: Date
+    let end: Date
+    let allDay: Bool
+    let color: CGColor?
+
+    /// Verschiedene Kalenderfarben in Terminreihenfolge (nil = Kalender ohne Farbe).
+    static func colors(of events: [CalEvent]) -> [CGColor?] {
+        events.reduce(into: []) { out, e in if !out.contains(where: { $0 == e.color }) { out.append(e.color) } }
+    }
+
+    /// Termine eines Tages, Ganztägiges zuerst. Für heute nur, was noch nicht vorbei ist.
+    static func on(_ day: Date, from events: [CalEvent], now: Date, calendar: Calendar = MonthGrid.calendar) -> [CalEvent] {
+        let dayStart = calendar.startOfDay(for: day)
+        guard let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { return [] }
+        let isToday = calendar.isDate(day, inSameDayAs: now)
+        return events
+            .filter { $0.start < dayEnd && $0.end > dayStart && (!isToday || $0.end > now) }
+            .sorted { ($0.allDay ? 0 : 1, $0.start) < ($1.allDay ? 0 : 1, $1.start) }
+    }
+}
+
+/// Liest Termine aus der Kalender-App (EventKit). Fragt erst, wenn der Nutzer im Popup darauf klickt.
+@MainActor
+final class CalendarModel: ObservableObject {
+    static let shared = CalendarModel()
+
+    private let store = EKEventStore()
+    @Published private(set) var status = EKEventStore.authorizationStatus(for: .event)
+    /// Termine des angezeigten Monats.
+    @Published private(set) var events: [CalEvent] = []
+    private var month = Date()
+
+    private init() {
+        NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: store, queue: .main) { _ in
+            MainActor.assumeIsolated { CalendarModel.shared.load() }
+        }
+    }
+
+    func requestAccess() {
+        store.requestFullAccessToEvents { _, _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { CalendarModel.shared.load() } }
+        }
+    }
+
+    func show(month: Date) {
+        self.month = month
+        load()
+    }
+
+    func load() {
+        status = EKEventStore.authorizationStatus(for: .event)
+        guard status == .fullAccess, let range = MonthGrid.calendar.dateInterval(of: .month, for: month) else {
+            events = []
+            return
+        }
+        let predicate = store.predicateForEvents(withStart: range.start, end: range.end, calendars: nil)
+        let new = store.events(matching: predicate).map {
+            CalEvent(id: ($0.eventIdentifier ?? UUID().uuidString) + "\($0.startDate.timeIntervalSince1970)",
+                     title: $0.title ?? "Ohne Titel", start: $0.startDate, end: $0.endDate,
+                     allDay: $0.isAllDay, color: $0.calendar?.cgColor)
+        }
+        if new != events { events = new }
+    }
+}
+
 private func formatter(_ format: String) -> DateFormatter {
     let f = DateFormatter()
     f.locale = Locale(identifier: "de_DE")
@@ -33,16 +103,34 @@ private func formatter(_ format: String) -> DateFormatter {
 
 private let monthTitle = formatter("LLLL yyyy")
 private let longDate = formatter("EEEE, d. MMMM")
+private let shortTime = formatter("HH:mm")
 
 struct CalendarPopup: View {
     @State private var month = Date()
+    @State private var selected = Date()
+    @ObservedObject private var model = CalendarModel.shared
     @Environment(\.dockTheme) private var theme
 
     var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            monthView
+            Divider()
+            agenda.frame(width: 348, alignment: .leading)   // Breite der Zeile darüber (130 + 18 + 200)
+        }
+        .padding(14)
+        .onAppear { model.show(month: month) }
+        .onChange(of: month) {
+            // Geladen wird nur der angezeigte Monat – die Auswahl wandert mit.
+            if !MonthGrid.calendar.isDate(selected, equalTo: month, toGranularity: .month) { selected = month }
+            model.show(month: month)
+        }
+    }
+
+    private var monthView: some View {
         let cal = MonthGrid.calendar
         let cells = MonthGrid.cells(for: month, calendar: cal)
         let today = Date()
-        HStack(alignment: .top, spacing: 18) {
+        return HStack(alignment: .top, spacing: 18) {
             VStack(spacing: 10) {
                 AnalogClock().frame(width: 116, height: 116)
                 Text(longDate.string(from: today))
@@ -55,7 +143,7 @@ struct CalendarPopup: View {
                     Text(monthTitle.string(from: month)).font(.system(size: 13, weight: .semibold))
                     Spacer()
                     monthButton("chevron.left", help: "Vorheriger Monat", by: -1)
-                    Button { month = Date() } label: { Image(systemName: "circle.fill").font(.system(size: 6)) }
+                    Button { month = Date(); selected = Date() } label: { Image(systemName: "circle.fill").font(.system(size: 6)) }
                         .buttonStyle(.plain).foregroundStyle(.secondary).help("Heute").accessibilityLabel("Heute")
                     monthButton("chevron.right", help: "Nächster Monat", by: 1)
                 }
@@ -66,21 +154,98 @@ struct CalendarPopup: View {
                     }
                     ForEach(Array(cells.enumerated()), id: \.offset) { _, day in
                         if let day {
-                            let isToday = cal.isDate(day, inSameDayAs: today)
-                            Text("\(cal.component(.day, from: day))")
-                                .font(.system(size: 11.5, weight: isToday ? .bold : .regular).monospacedDigit())
-                                .foregroundStyle(isToday ? Color.white : Color.primary)
-                                .frame(width: 24, height: 22)
-                                .background(Circle().fill(isToday ? theme.accent : .clear))
+                            dayCell(day, today: today, cal: cal)
                         } else {
-                            Color.clear.frame(width: 24, height: 22)
+                            Color.clear.frame(width: 24, height: 27)
                         }
                     }
                 }
             }
             .frame(width: 200)
         }
-        .padding(14)
+    }
+
+    private func dayCell(_ day: Date, today: Date, cal: Calendar) -> some View {
+        let isToday = cal.isDate(day, inSameDayAs: today)
+        let isSelected = cal.isDate(day, inSameDayAs: selected)
+        let dayEvents = CalEvent.on(day, from: model.events, now: .distantPast, calendar: cal)
+        let busy = !dayEvents.isEmpty
+        return Button { selected = day } label: {
+            Text("\(cal.component(.day, from: day))")
+                .font(.system(size: 11.5, weight: isToday ? .bold : .regular).monospacedDigit())
+                .foregroundStyle(isToday ? Color.white : Color.primary)
+                .frame(width: 24, height: 22)
+                .background(Circle().fill(isToday ? theme.accent : .clear))
+                .overlay(Circle().strokeBorder(theme.accent, lineWidth: isSelected && !isToday ? 1.5 : 0))
+                // Ein Punkt je Kalenderfarbe (höchstens 3), unter der Zahl.
+                .frame(height: 27, alignment: .top)
+                .overlay(alignment: .bottom) {
+                    HStack(spacing: 2) {
+                        ForEach(Array(CalEvent.colors(of: dayEvents).prefix(3).enumerated()), id: \.offset) { _, c in
+                            Circle().fill(c.map { Color(cgColor: $0) } ?? theme.accent).frame(width: 4, height: 4)
+                        }
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(longDate.string(from: day) + (busy ? ", mit Terminen" : ""))
+    }
+
+    @ViewBuilder private var agenda: some View {
+        let isToday = MonthGrid.calendar.isDateInToday(selected)
+        VStack(alignment: .leading, spacing: 6) {
+            Text(isToday ? "Heute noch" : longDate.string(from: selected))
+                .font(.system(size: 12, weight: .semibold))
+            switch model.status {
+            case .fullAccess:
+                let list = CalEvent.on(selected, from: model.events, now: Date())
+                if list.isEmpty {
+                    Text(isToday ? "Keine Termine mehr" : "Keine Termine")
+                        .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                } else {
+                    ForEach(list.prefix(6)) { eventRow($0) }
+                    if list.count > 6 {
+                        Text("+ \(list.count - 6) weitere").font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
+            case .notDetermined:
+                Button("Termine aus der Kalender-App anzeigen") { model.requestAccess() }
+                    .controlSize(.small)
+            default:
+                Text("Pier hat keinen Zugriff auf deine Kalender.")
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                Button("Systemeinstellungen öffnen") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .controlSize(.small)
+            }
+        }
+    }
+
+    private func eventRow(_ e: CalEvent) -> some View {
+        let color = e.color.map { Color(cgColor: $0) } ?? theme.accent
+        let now = Date()
+        let running = !e.allDay && e.start <= now && e.end > now
+        return HStack(spacing: 7) {
+            Capsule().fill(color).frame(width: 3)
+            Text(e.allDay ? "ganztägig" : "\(shortTime.string(from: e.start))–\(shortTime.string(from: e.end))")
+                .font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
+                .frame(width: 76, alignment: .leading)
+            Text(e.title).font(.system(size: 11.5, weight: .medium)).lineLimit(1).truncationMode(.tail)
+            Spacer(minLength: 4)
+            if running {
+                Text("jetzt").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                    .padding(.horizontal, 6).padding(.vertical, 1.5)
+                    .background(Capsule().fill(color))
+            }
+        }
+        .padding(.vertical, 4).padding(.leading, 4).padding(.trailing, 6)
+        .frame(height: 24)
+        .background(RoundedRectangle(cornerRadius: 6).fill(color.opacity(running ? 0.32 : 0.18)))
+        .accessibilityElement(children: .combine)
     }
 
     private func monthButton(_ symbol: String, help: String, by delta: Int) -> some View {

@@ -26,6 +26,8 @@
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Pier liest die Titelposition aus Music und VLC sowie beim Thema „Now Playing“ das Cover aus Music und Spotify.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Pier zeigt im Kalender an der Uhr deine nächsten Termine an. Die Termine bleiben auf deinem Mac.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Pier zeigt deine gekoppelten Bluetooth-Geräte in der Geräte-Liste und verbindet oder trennt sie dort.</string>
 	<key>NSHighResolutionCapable</key>

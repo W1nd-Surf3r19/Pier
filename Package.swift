@@ -15,6 +15,7 @@ let package = Package(
                 .linkedFramework("Carbon"),
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("IOBluetooth"),
+                .linkedFramework("EventKit"),
             ]
         ),
         .testTarget(name: "PierTests", dependencies: ["Pier"], path: "Tests/PierTests"),
