@@ -270,6 +270,21 @@ Pier über sein Menü beenden („Pier beenden“), dabei kommt das Mac-Dock zur
 </details>
 
 <details>
+<summary><b>Die Berechtigungen sind an, aber Pier erkennt sie nicht</b></summary>
+<br>
+
+Das passiert nach einem Update oder Neubau: Die Homebrew-Version ist ad hoc signiert, und macOS hält jede neu gebaute App für eine andere. Der Schalter in den Systemeinstellungen gehört dann noch zur alten Version. Pier beenden, die Einträge zurücksetzen und neu erlauben:
+
+```sh
+for s in Accessibility ScreenCapture AppleEvents BluetoothAlways; do tccutil reset $s app.pier.dock; done
+open ~/Applications/Pier.app
+```
+
+Dauerhaft vermeiden lässt sich das nur mit einer [eigenen Signatur](#installieren) beim Selbstbauen.
+
+</details>
+
+<details>
 <summary><b>Mein Mac-Dock ist verschwunden!</b></summary>
 <br>
 
