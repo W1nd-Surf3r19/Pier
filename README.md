@@ -8,6 +8,12 @@
 
 Ein eigener Dock-Ersatz für macOS, gebaut mit Swift und SwiftUI. Pier blendet das Mac-Dock aus und stellt es beim Beenden wieder her. Der Dock-Prozess selbst läuft weiter, deshalb funktionieren Mission Control, Spaces und ⌘-Tab wie gewohnt.
 
+![Leiste unten mit Gruppen, Musik-Tab und Widgets](docs/screenshots/bar.png)
+
+![Pille mit App-Kacheln und Widgets](docs/screenshots/pill.png)
+
+<p align="center"><img src="docs/screenshots/launcher.png" width="600" alt="Launcher mit Suche und App-Raster"></p>
+
 ## Funktionen
 
 **Dock**
