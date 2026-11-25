@@ -76,6 +76,7 @@ final class WidgetModel: ObservableObject {
     @Published private(set) var artworkColor: NSColor?
     private var artworkKey: String?
 
+    @Published private(set) var trashFull = false
     private var timer: Timer?
     private var mediaTimer: Timer?
     private var scriptRunning = false
@@ -97,8 +98,43 @@ final class WidgetModel: ObservableObject {
         }
         // Position nachführen: Music meldet sie nicht, VLC meldet gar nichts. Dazwischen rechnet die Ansicht selbst.
         mediaTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.syncMedia() }
+            MainActor.assumeIsolated { self?.syncMedia(); self?.updateTrash() }
         }
+        updateTrash()
+    }
+
+    // MARK: Papierkorb
+
+    /// ~/.Trash selbst darf Pier ohne Festplattenvollzugriff nicht lesen – der Finder darf.
+    func updateTrash() {
+        guard DockStore.shared.settings.showTrash else { return }
+        PlayerScript.run("com.apple.finder", "tell application id \"com.apple.finder\" to return (count of items of trash) > 0") { [weak self] out in
+            guard let self, let out else { return }
+            let full = out == "true"
+            if full != self.trashFull { self.trashFull = full }
+        }
+    }
+
+    func openTrash() {
+        NSWorkspace.shared.open(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash"))
+    }
+
+    func moveToTrash(_ urls: [URL]) -> Bool {
+        var moved = false
+        for u in urls where (try? FileManager.default.trashItem(at: u, resultingItemURL: nil)) != nil { moved = true }
+        updateTrash()
+        return moved
+    }
+
+    func emptyTrash() {
+        let alert = NSAlert()
+        alert.messageText = "Papierkorb wirklich entleeren?"
+        alert.informativeText = "Die Objekte werden sofort gelöscht. Das kann nicht rückgängig gemacht werden."
+        alert.addButton(withTitle: "Entleeren")
+        alert.addButton(withTitle: "Abbrechen")
+        NSApp.activate()
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        PlayerScript.run("com.apple.finder", "tell application id \"com.apple.finder\" to empty trash") { [weak self] _ in self?.updateTrash() }
     }
 
     // Millisekunden als Ganzzahl – „as text“ einer Kommazahl hängt vom Gebietsschema ab.
@@ -425,6 +461,7 @@ struct WidgetStrip: View {
     var hasContent: Bool {
         settings.showClock || (settings.showBattery && model.battery != nil)
             || (settings.showNowPlaying && !hideNowPlaying && model.nowPlaying != nil) || settings.showSound || showsDevices
+            || settings.showTrash
     }
 
     var body: some View {
@@ -442,6 +479,14 @@ struct WidgetStrip: View {
             }
             if settings.showBattery, let b = model.battery { BatteryWidget(state: b, stacked: narrow) }
             if settings.showClock { ClockWidget(showDate: settings.showDate && !narrow) }
+            if settings.showTrash {
+                WidgetButton(symbol: model.trashFull ? "trash.fill" : "trash", help: "Papierkorb") { _ in model.openTrash() }
+                    .dropDestination(for: URL.self) { urls, _ in model.moveToTrash(urls) }
+                    .contextMenu {
+                        Button("Öffnen") { model.openTrash() }
+                        Button("Papierkorb entleeren …") { model.emptyTrash() }
+                    }
+            }
         }
     }
 }

@@ -514,10 +514,11 @@ struct WidgetsTab: View {
                 Toggle("Geräte: externe Laufwerke auswerfen", isOn: $store.settings.showDevices)
                 Toggle("Bluetooth-Geräte in der Geräte-Liste", isOn: $store.settings.showBluetooth)
                     .disabled(!store.settings.showDevices)
+                Toggle("Papierkorb (Dateien darauf ziehen, Rechtsklick zum Entleeren)", isOn: $store.settings.showTrash)
                 Toggle("Aktuelle Musik (Apple Music, Spotify)", isOn: $store.settings.showNowPlaying)
                 Toggle("Badges, Fortschritt und Hinweise an App-Icons", isOn: $store.settings.showBadges)
             } header: { Text("Im Dock anzeigen") } footer: {
-                Text("Darüberfahren über die Uhr zeigt Kalender, Zifferblatt und deine Termine (nach einmaliger Kalender-Erlaubnis). Die Musik-Anzeige erscheint, sobald Music oder Spotify einen Titel startet oder pausiert. Badges übernimmt Pier vom ausgeblendeten Mac-Dock (braucht Bedienungshilfen). Die Geräte-Kachel erscheint, sobald ein Laufwerk angeschlossen ist oder Bluetooth eingeschaltet ist; macOS fragt beim ersten Öffnen nach der Bluetooth-Erlaubnis.")
+                Text("Darüberfahren über die Uhr zeigt Kalender, Zifferblatt und deine Termine (nach einmaliger Kalender-Erlaubnis). Die Musik-Anzeige erscheint, sobald Music oder Spotify einen Titel startet oder pausiert. Badges übernimmt Pier vom ausgeblendeten Mac-Dock (braucht Bedienungshilfen). Die Geräte-Kachel erscheint, sobald ein Laufwerk angeschlossen ist oder Bluetooth eingeschaltet ist; macOS fragt beim ersten Öffnen nach der Bluetooth-Erlaubnis. Ob der Papierkorb voll ist, fragt Pier beim Finder nach – macOS bittet dafür einmal um Erlaubnis.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

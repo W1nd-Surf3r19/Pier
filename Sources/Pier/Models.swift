@@ -298,6 +298,7 @@ struct DockSettings: Codable, Equatable {
     var customColor = "#3478F6"
     var showSound = true
     var showDevices = true
+    var showTrash = true
     /// Bluetooth-Geräte in der Geräte-Liste (fragt beim ersten Öffnen nach der Bluetooth-Erlaubnis).
     var showBluetooth = false
     /// Eigene Ordner im Launcher (Pfade).
@@ -358,6 +359,7 @@ struct DockSettings: Codable, Equatable {
         customColor = v(.customColor, d.customColor)
         showSound = v(.showSound, d.showSound)
         showDevices = v(.showDevices, d.showDevices)
+        showTrash = v(.showTrash, d.showTrash)
         showBluetooth = v(.showBluetooth, d.showBluetooth)
         launcherFolders = v(.launcherFolders, d.launcherFolders)
         groupOrder = v(.groupOrder, d.groupOrder)
