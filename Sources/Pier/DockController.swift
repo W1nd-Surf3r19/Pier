@@ -79,7 +79,7 @@ final class DockController {
         let (panel, effect) = PanelFactory.makeGlass(PassivePanel.self, level: PanelFactory.dockLevel, radius: nil)
         self.panel = panel
         self.effect = effect
-        hosting = FirstMouseHostingView(rootView: DockRootView(fit: fit, onSize: { _ in }))
+        hosting = FirstMouseHostingView(rootView: DockRootView(displayID: displayID, fit: fit, onSize: { _ in }))
         hosting.sizingOptions = []
         // Container: Glas (nur Leiste) hinten, SwiftUI vorne. Im Pillen-Stil zeichnen die Inseln ihr eigenes Glas.
         let container = NSView()
@@ -98,7 +98,7 @@ final class DockController {
         hosting.frame = container.bounds
         hosting.autoresizingMask = [.width, .height]
         container.addSubview(hosting)
-        hosting.rootView = DockRootView(fit: fit, onSize: { [weak self] size in self?.contentSizeChanged(size) })
+        hosting.rootView = DockRootView(displayID: displayID, fit: fit, onSize: { [weak self] size in self?.contentSizeChanged(size) })
         // Tönung folgt den aufgelösten Farben – auch wenn nur das Cover wechselt.
         themeSub = ThemeModel.shared.$colors.sink { [weak self] c in
             self?.tint.colors = c.glass.isEmpty ? nil : c.glass.map { NSColor($0).withAlphaComponent(0.2).cgColor }

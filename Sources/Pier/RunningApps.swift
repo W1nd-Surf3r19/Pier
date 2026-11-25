@@ -27,6 +27,7 @@ final class RunningAppsModel: ObservableObject {
     @Published private(set) var frontmostPID: pid_t = 0
     @Published private(set) var windows: [pid_t: [WindowRef]] = [:]
     @Published private(set) var onScreen: Set<CGWindowID> = []
+    @Published private(set) var windowDisplays: [CGWindowID: CGDirectDisplayID] = [:]
     @Published private(set) var launching: Set<String> = []
     @Published private(set) var badges: [String: String] = [:]
     @Published private(set) var progress: [String: Double] = [:]
@@ -83,6 +84,7 @@ final class RunningAppsModel: ObservableObject {
             let scan = WindowService.windows(for: pids)
             let status = WindowService.dockStatus()
             let onScreen = WindowService.onScreenWindowIDs()
+            let displays = WindowService.windowDisplays()
             await MainActor.run {
                 // Wer nicht antwortet, behält seine letzten Fenster – sonst fielen die Tabs gerade dann zusammen.
                 var result = scan.windows
@@ -94,6 +96,7 @@ final class RunningAppsModel: ObservableObject {
                 self.axFailures = h.failures
                 if h.hung != self.hung { self.hung = h.hung }
                 if onScreen != self.onScreen { self.onScreen = onScreen }
+                if displays != self.windowDisplays { self.windowDisplays = displays }
                 if status.badges != self.badges {
                     if self.statusLoaded { self.flashNewBadges(old: self.badges, new: status.badges) }
                     self.badges = status.badges
@@ -146,10 +149,26 @@ final class RunningAppsModel: ObservableObject {
 
     /// Fenster einer App, wie Pier sie zeigt: auf Wunsch nur die des aktuellen Schreibtischs.
     /// Minimierte Fenster und Fenster ausgeblendeter Apps liegen nie auf dem Bildschirm – sie bleiben drin.
-    func shownWindows(of app: NSRunningApplication) -> [WindowRef] {
-        let all = windows[app.processIdentifier] ?? []
+    /// `display`: nur Fenster auf diesem Monitor (bei „Jeder Monitor zeigt nur seine Apps“); minimierte bleiben.
+    func shownWindows(of app: NSRunningApplication, on display: CGDirectDisplayID? = nil) -> [WindowRef] {
+        var all = windows[app.processIdentifier] ?? []
+        if let d = perScreenDisplay(display), !app.isHidden {
+            all = all.filter { $0.isMinimized || (windowDisplays[$0.windowID] ?? d) == d }
+        }
         guard DockStore.shared.settings.currentSpaceOnly, !app.isHidden else { return all }
         return all.filter { $0.isMinimized || $0.windowID == 0 || onScreen.contains($0.windowID) }
+    }
+
+    private func perScreenDisplay(_ display: CGDirectDisplayID?) -> CGDirectDisplayID? {
+        let s = DockStore.shared.settings
+        return s.perScreenApps && s.allScreens ? display : nil
+    }
+
+    /// Gehört die App ins Dock dieses Monitors (auch angepinnte)? Ohne sichtbares Fenster (keins, nur minimiert, ausgeblendet): überall.
+    func belongs(_ app: NSRunningApplication, to display: CGDirectDisplayID?) -> Bool {
+        guard let d = perScreenDisplay(display), !app.isHidden else { return true }
+        let placed = (windows[app.processIdentifier] ?? []).filter { !$0.isMinimized }.compactMap { windowDisplays[$0.windowID] }
+        return placed.isEmpty || placed.contains(d)
     }
 
     func app(forKey key: String) -> NSRunningApplication? {
@@ -178,17 +197,17 @@ final class RunningAppsModel: ObservableObject {
     }
 
     /// Laufende Apps, die nicht direkt im Dock angepinnt sind.
-    func unpinnedApps(pinned: Set<String>) -> [NSRunningApplication] {
-        otherApps.filter { !pinned.contains(AppName.key($0)) }
+    func unpinnedApps(pinned: Set<String>, on display: CGDirectDisplayID? = nil) -> [NSRunningApplication] {
+        otherApps.filter { !pinned.contains(AppName.key($0)) && belongs($0, to: display) }
     }
 
     /// Tabs einer App für die Leiste: ein Tab pro Fenster, ohne Fenster ein App-Tab.
     /// `grouped`: mehrere Fenster teilen sich einen Tab.
-    func tasks(for app: NSRunningApplication, grouped: Bool = false) -> [TaskItem] {
+    func tasks(for app: NSRunningApplication, grouped: Bool = false, on display: CGDirectDisplayID? = nil) -> [TaskItem] {
         let key = AppName.key(app)
         let name = app.localizedName ?? "App"
         let isFront = app.processIdentifier == frontmostPID && !app.isHidden
-        let wins = shownWindows(of: app)
+        let wins = shownWindows(of: app, on: display)
         if wins.isEmpty {
             return [TaskItem(id: "a-\(key)", app: app, window: nil, title: name, isActive: isFront)]
         }

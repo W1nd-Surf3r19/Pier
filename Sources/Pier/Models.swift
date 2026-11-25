@@ -280,6 +280,8 @@ struct DockSettings: Codable, Equatable {
     var scrollCyclesWindows = true
     var showActivity = true
     var currentSpaceOnly = false
+    /// Bei mehreren Docks: jedes zeigt nur laufende Apps mit Fenstern auf seinem Monitor.
+    var perScreenApps = false
     var titlebarScroll = false
     var altTab = false
     var edge: DockEdge = .bottom
@@ -339,6 +341,7 @@ struct DockSettings: Codable, Equatable {
         scrollCyclesWindows = v(.scrollCyclesWindows, d.scrollCyclesWindows)
         showActivity = v(.showActivity, d.showActivity)
         currentSpaceOnly = v(.currentSpaceOnly, d.currentSpaceOnly)
+        perScreenApps = v(.perScreenApps, d.perScreenApps)
         titlebarScroll = v(.titlebarScroll, d.titlebarScroll)
         altTab = v(.altTab, d.altTab)
         edge = v(.edge, d.edge)

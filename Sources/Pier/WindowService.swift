@@ -63,6 +63,28 @@ enum WindowService {
         return Set(info.compactMap { $0[kCGWindowNumber as String] as? CGWindowID })
     }
 
+    /// Monitor jedes normalen Fensters (auch auf anderen Schreibtischen): der mit der größten Überdeckung.
+    static func windowDisplays() -> [CGWindowID: CGDirectDisplayID] {
+        var count: UInt32 = 0
+        CGGetActiveDisplayList(0, nil, &count)
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        CGGetActiveDisplayList(count, &ids, &count)
+        let displays = ids.prefix(Int(count)).map { ($0, CGDisplayBounds($0)) }
+        let info = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        var result: [CGWindowID: CGDirectDisplayID] = [:]
+        for w in info where (w[kCGWindowLayer as String] as? Int) == 0 {
+            guard let id = w[kCGWindowNumber as String] as? CGWindowID,
+                  let b = w[kCGWindowBounds as String] as? NSDictionary,
+                  let r = CGRect(dictionaryRepresentation: b as CFDictionary) else { continue }
+            let best = displays.max { a, c in
+                let x = a.1.intersection(r), y = c.1.intersection(r)
+                return (x.isNull ? 0 : x.width * x.height) < (y.isNull ? 0 : y.width * y.height)
+            }
+            if let best, best.1.intersects(r) { result[id] = best.0 }
+        }
+        return result
+    }
+
     static func raise(_ w: WindowRef) {
         if w.isMinimized {
             AXUIElementSetAttributeValue(w.element, kAXMinimizedAttribute as CFString, kCFBooleanFalse)

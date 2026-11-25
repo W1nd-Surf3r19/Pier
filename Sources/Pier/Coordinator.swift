@@ -251,7 +251,7 @@ final class Coordinator {
             let wins: [WindowRef]
             switch hovered {
             case .app(let key, _): wins = running.windows(forKey: key)
-            case .window(let w): wins = NSRunningApplication(processIdentifier: w.pid).map(running.shownWindows) ?? []
+            case .window(let w): wins = NSRunningApplication(processIdentifier: w.pid).map { running.shownWindows(of: $0) } ?? []
             case .label, .calendar, .battery: return
             }
             guard !wins.isEmpty else { return }

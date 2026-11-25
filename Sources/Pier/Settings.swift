@@ -174,6 +174,8 @@ struct AppearanceTab: View {
                 Toggle("Scrollen über einem Icon wechselt die Fenster", isOn: $store.settings.scrollCyclesWindows)
                 Toggle("⌃ halten zeigt CPU und Speicher je App", isOn: $store.settings.showActivity)
                 Toggle("Nur Fenster des aktuellen Schreibtischs zeigen", isOn: $store.settings.currentSpaceOnly)
+                Toggle("Jeder Monitor zeigt nur seine Apps", isOn: $store.settings.perScreenApps)
+                    .help("Gilt, wenn das Dock auf allen Bildschirmen steht. Auch angepinnte Apps erscheinen nur dort, wo ihr Fenster liegt. Apps ohne sichtbares Fenster und nicht laufende angepinnte Apps erscheinen überall.")
                 Toggle("Scrollen auf einer Titelleiste ordnet das Fenster an", isOn: $store.settings.titlebarScroll)
                     .help("Hoch: maximieren · Runter: zentrieren · Links/Rechts: Bildschirmhälfte")
             } header: { Text("Verhalten") }

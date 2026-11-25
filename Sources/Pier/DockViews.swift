@@ -6,6 +6,7 @@ import SwiftUI
 struct DockRootView: View {
     @ObservedObject var store = DockStore.shared
     @ObservedObject var theme = ThemeModel.shared
+    let displayID: CGDirectDisplayID
     let fit: DockFit
     var onSize: (CGSize) -> Void
 
@@ -20,6 +21,7 @@ struct DockRootView: View {
         }
         .environment(\.dockEdge, s.effectiveEdge)
         .environment(\.dockTheme, theme.colors)
+        .environment(\.dockDisplay, displayID)
         .onGeometryChange(for: CGSize.self) { $0.size } action: { onSize($0) }
         .dropDestination(for: URL.self) { urls, _ in Coordinator.shared.drop(urls, onto: nil) }
         .contextMenu {
@@ -36,6 +38,7 @@ struct DockRootView: View {
 
 struct PillDockView: View {
     let settings: DockSettings
+    @Environment(\.dockDisplay) private var display
     @ObservedObject var store = DockStore.shared
     @ObservedObject var running = RunningAppsModel.shared
     @ObservedObject var widgets = WidgetModel.shared
@@ -44,7 +47,7 @@ struct PillDockView: View {
 
     var body: some View {
         let size = (CGFloat(settings.iconSize) * fit.scale).rounded()
-        let extra = settings.showRunningApps ? running.unpinnedApps(pinned: store.topLevelKeys) : []
+        let extra = settings.showRunningApps ? running.unpinnedApps(pinned: store.topLevelKeys, on: display) : []
         let placed = SmartArranger.placeRunning(extra, in: store.entries, settings: settings)
         let vertical = settings.effectiveEdge.isVertical
         let strip = WidgetStrip(settings: settings, compact: true, vertical: vertical)
@@ -130,6 +133,7 @@ enum BarItem: Identifiable {
 
 struct BarDockView: View {
     let settings: DockSettings
+    @Environment(\.dockDisplay) private var display
     @ObservedObject var store = DockStore.shared
     @ObservedObject var running = RunningAppsModel.shared
     @ObservedObject var widgets = WidgetModel.shared
@@ -189,9 +193,9 @@ struct BarDockView: View {
     /// Danach alle übrigen laufenden Apps (bei „In Gruppen einsortieren“ hinter ihrer Gruppe, sonst hinten).
     private func items(grouped: Bool) -> [BarItem] {
         var result: [BarItem] = settings.showLauncher ? [.launcher] : []
-        let extra = settings.showRunningApps ? running.unpinnedApps(pinned: store.topLevelKeys) : []
+        let extra = settings.showRunningApps ? running.unpinnedApps(pinned: store.topLevelKeys, on: display) : []
         let placed = SmartArranger.placeRunning(extra, in: store.entries, settings: settings)
-        for app in placed.after[-1] ?? [] { result += running.tasks(for: app, grouped: grouped).map(BarItem.task) }
+        for app in placed.after[-1] ?? [] { result += running.tasks(for: app, grouped: grouped, on: display).map(BarItem.task) }
         for (i, entry) in store.entries.enumerated() {
             switch entry {
             case .folder(let f):
@@ -204,14 +208,20 @@ struct BarDockView: View {
                 result.append(.separator(s.id))
             case .app(let a):
                 if let app = running.app(forKey: a.key) {
-                    result += running.tasks(for: app, grouped: grouped).map(BarItem.task)
+                    guard running.belongs(app, to: display) else { break }
+                    result += running.tasks(for: app, grouped: grouped, on: display).map(BarItem.task)
                 } else {
                     result.append(.pinned(a))
                 }
             }
-            for app in placed.after[i] ?? [] { result += running.tasks(for: app, grouped: grouped).map(BarItem.task) }
+            for app in placed.after[i] ?? [] { result += running.tasks(for: app, grouped: grouped, on: display).map(BarItem.task) }
         }
-        for app in placed.rest { result += running.tasks(for: app, grouped: grouped).map(BarItem.task) }
+        for app in placed.rest { result += running.tasks(for: app, grouped: grouped, on: display).map(BarItem.task) }
+        // Ausgeblendete Gruppen (anderer Monitor) hinterlassen sonst Trennstriche direkt hintereinander.
+        result = result.enumerated().filter { i, item in
+            guard i > 0, case .separator = item, case .separator = result[i - 1] else { return true }
+            return false
+        }.map(\.element)
         // Schmale seitliche Leiste („Nur Icons“): kein Platz für den Musik-Tab – dann bleibt das Widget.
         let narrow = settings.effectiveEdge.isVertical && settings.barLabels == .iconsOnly
         if settings.showNowPlaying, !narrow, let player = widgets.nowPlaying?.playerBundleID,
@@ -372,6 +382,7 @@ struct TabColumn: View {
 }
 
 struct BarItemView: View {
+    @Environment(\.dockDisplay) private var display
     let item: BarItem
     let height: CGFloat
     let width: CGFloat
@@ -501,7 +512,7 @@ struct BarItemView: View {
 
     private func isFirstTab(_ t: TaskItem) -> Bool {
         guard let w = t.window else { return true }
-        return running.shownWindows(of: t.app).first?.id == w.id
+        return running.shownWindows(of: t.app, on: display).first?.id == w.id
     }
 }
 
@@ -614,12 +625,16 @@ struct EntryIcons: View {
     /// Laufende Apps, die hinter dem Eintrag mit diesem Index einsortiert werden.
     var running: [Int: [NSRunningApplication]] = [:]
     @Environment(\.dockEdge) private var edge
+    @Environment(\.dockDisplay) private var display
 
     var body: some View {
         ForEach(running[-1] ?? [], id: \.processIdentifier) { RunningAppIcon(app: $0, size: size) }
         ForEach(Array(entries.enumerated()), id: \.element.id) { i, entry in
             switch entry {
-            case .app(let app): PinnedAppIcon(app: app, size: size)
+            case .app(let app):
+                if RunningAppsModel.shared.app(forKey: app.key).map({ RunningAppsModel.shared.belongs($0, to: display) }) ?? true {
+                    PinnedAppIcon(app: app, size: size)
+                }
             case .folder(let f): FolderTile(folder: f, size: size)
             case .stack(let s): StackTile(stack: s, size: size)
             case .file(let f): FileTile(file: f, size: size)
@@ -1098,6 +1113,7 @@ private struct DockEdgeKey: EnvironmentKey {
 
 extension EnvironmentValues {
     @Entry var dockTheme = ThemeColors.fallback
+    @Entry var dockDisplay: CGDirectDisplayID? = nil
     var dockEdge: DockEdge {
         get { self[DockEdgeKey.self] }
         set { self[DockEdgeKey.self] = newValue }
